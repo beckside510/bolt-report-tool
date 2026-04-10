@@ -324,6 +324,15 @@
       </div>
     </div>
 
+    <div class="card" id="debugCard" style="border-color:#3d4a68;">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>// Debug — Raw PDF.js Text Output</span>
+        <button class="btn btn-secondary" style="font-size:10px;padding:4px 10px;" onclick="document.getElementById('debugText').style.display = document.getElementById('debugText').style.display === 'none' ? 'block' : 'none'">Toggle</button>
+      </div>
+      <p style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:10px;">Copy everything in the box below and paste it into Claude so the parser can be fixed against real browser output.</p>
+      <textarea id="debugText" readonly style="display:block;width:100%;height:300px;background:var(--bg);border:1px solid var(--border);color:var(--text-muted);font-family:var(--mono);font-size:11px;padding:12px;resize:vertical;"></textarea>
+    </div>
+
     <div class="card">
       <div class="card-title">// Sheet Settings</div>
       <div class="input-row">
@@ -412,6 +421,9 @@ async function handleFile(file) {
     // Reverse because PDF Y coords go bottom-up
     allText += pageLines.reverse().join('\n') + '\n';
   }
+  // Store raw text for debug inspection
+  window._debugRawText = allText;
+
   setProgress(true, 'Extracting cut data…', 90);
   const result = extractCuts(allText);
   parsedCuts = result.cuts;
@@ -563,6 +575,13 @@ function showPreview() {
       tbody.appendChild(tr);
     });
   });
+
+  // Populate debug textarea
+  const debugEl = document.getElementById('debugText');
+  if (debugEl && window._debugRawText) {
+    // Just the first 16 pages worth — trim photo section pages
+    debugEl.value = window._debugRawText.substring(0, 40000);
+  }
 
   // Transition
   document.getElementById('panel-upload').classList.add('hidden');
