@@ -21,6 +21,5 @@
 - Establish audience, usage frequency, technical environment, and failure tolerance
 - Identify all edge cases by examining real data before building, not during QA
 
-## Known Mac Gotchas (for any .command scripts)
-- Gatekeeper: user runs `xattr -d com.apple.quarantine /path/to/file.command` once after download
-- Drag-and-drop path escaping: use `read -rp "..." RAW_VAR` then `EVAL_VAR=$(eval echo "$RAW_VAR")`
+## PDF Parsing QA (applies to every tool that parses PDFs)
+- Never validate a PDF parser using pdfplumber or any server-side Python library — they produce different text output than PDF.js i
