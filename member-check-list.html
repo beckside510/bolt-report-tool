@@ -100,6 +100,62 @@
   .hidden{display:none;}
   .future-note{margin-top:16px;padding:10px 14px;background:rgba(74,183,232,0.05);border:1px solid rgba(74,183,232,0.15);border-radius:5px;font-family:var(--mono);font-size:11px;color:var(--text-dim);line-height:1.6;}
   .future-note strong{color:var(--accent2);}
+
+  /* Settings panel (Step 2) */
+  .settings-field{margin-bottom:14px;}
+  .settings-field label{display:block;font-family:var(--mono);font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;}
+  .settings-field input[type="text"],.settings-field input[type="password"]{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:10px 12px;font-family:var(--mono);font-size:12px;color:var(--text);transition:border-color 0.15s;}
+  .settings-field input:focus{outline:none;border-color:var(--accent);}
+  .settings-field .input-row{position:relative;}
+  .settings-field .input-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:var(--text-dim);cursor:pointer;padding:4px 8px;font-family:var(--mono);font-size:11px;}
+  .settings-field .input-toggle:hover{color:var(--accent);}
+  .settings-field .field-hint{font-size:10px;color:var(--text-dim);margin-top:4px;font-family:var(--mono);}
+  .connection-status{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:5px;font-family:var(--mono);font-size:11px;margin-top:8px;}
+  .connection-status.idle{background:var(--surface2);color:var(--text-dim);}
+  .connection-status.testing{background:rgba(232,197,71,0.08);color:var(--accent);}
+  .connection-status.ok{background:rgba(74,232,122,0.08);color:var(--green);}
+  .connection-status.error{background:rgba(232,74,74,0.08);color:var(--red);}
+  .connection-dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0;}
+
+  /* Review split panels (Approved vs Suspected Duplicates) */
+  .review-tabs{display:flex;gap:1px;background:var(--border);border-radius:6px 6px 0 0;overflow:hidden;margin-bottom:0;}
+  .review-tab{flex:1;background:var(--surface2);padding:12px 16px;font-family:var(--mono);font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;border:none;transition:all 0.15s;}
+  .review-tab:hover{color:var(--text);}
+  .review-tab.active{background:var(--surface);color:var(--accent);}
+  .review-tab .tab-count{background:var(--surface);color:var(--text);padding:2px 8px;border-radius:10px;font-size:10px;}
+  .review-tab.active .tab-count{background:var(--accent);color:#000;}
+  .review-tab.has-suspects:not(.active) .tab-count{background:rgba(232,148,74,0.2);color:var(--orange);}
+
+  /* Suspect cards (side-by-side) */
+  .suspect-list{padding:0;}
+  .suspect-item{padding:14px 16px;border-bottom:1px solid var(--border);}
+  .suspect-item:last-child{border-bottom:none;}
+  .suspect-item.resolved{opacity:0.45;}
+  .suspect-header{font-family:var(--mono);font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;}
+  .suspect-header .sh-id{color:var(--accent);}
+  .suspect-header .sh-disposition{color:var(--text-dim);font-size:10px;}
+  .suspect-header .sh-disposition.add{color:var(--green);}
+  .suspect-header .sh-disposition.skip{color:var(--text-dim);}
+  .suspect-header .sh-disposition.keep{color:var(--orange);}
+  .suspect-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}
+  .suspect-card{background:var(--surface2);border-radius:6px;padding:10px 12px;border-left:3px solid var(--border);}
+  .suspect-card.existing{border-left-color:var(--accent2);}
+  .suspect-card.incoming{border-left-color:var(--accent);}
+  .suspect-card-label{font-size:10px;color:var(--text-dim);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;}
+  .suspect-card-body{font-family:var(--mono);font-size:11px;color:var(--text);line-height:1.8;}
+  .suspect-card-body .field{display:grid;grid-template-columns:90px 1fr;gap:6px;}
+  .suspect-card-body .field-key{color:var(--text-dim);font-size:10px;}
+  .suspect-card-body .field-val{color:var(--text);word-break:break-word;}
+  .suspect-card-body .field-val.empty{color:#555;font-style:italic;}
+  .suspect-card-body .field-val.diff{background:rgba(232,148,74,0.15);padding:0 4px;border-radius:3px;}
+  .suspect-actions{display:flex;gap:8px;justify-content:flex-end;}
+  .btn-mini{padding:6px 12px;font-size:11px;border-radius:4px;font-family:var(--mono);cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text);transition:all 0.15s;}
+  .btn-mini:hover{border-color:var(--text-dim);}
+  .btn-mini.active-skip{background:var(--surface2);color:var(--text-dim);border-color:var(--border);}
+  .btn-mini.active-keep{background:rgba(232,148,74,0.15);color:var(--orange);border-color:rgba(232,148,74,0.3);}
+  .btn-mini.active-add{background:rgba(74,232,122,0.15);color:var(--green);border-color:rgba(74,232,122,0.3);}
+
+  .empty-review{padding:40px 20px;text-align:center;color:var(--text-dim);font-family:var(--mono);font-size:12px;}
 </style>
 </head>
 <body>
@@ -113,7 +169,7 @@
 </div>
 
 <div class="instructions">
-  <strong>How to use:</strong> Drop a folder of IR PDFs (or individual files) into the upload zone, then click <strong>Parse PDFs</strong>. Records are grouped by IR#, date, and inspector for review. Smartsheet push will be added in a future update.
+  <strong>How to use:</strong> Drop a folder of IR PDFs (or individual files) into the upload zone. Paste your Smartsheet API token and test the connection. Click <strong>Parse PDFs</strong> to extract records and cross-check them against the Principle sheet for suspected duplicates. Smartsheet push will be added in a future update.
 </div>
 
 <div class="panel">
@@ -134,6 +190,37 @@
       <span id="fileCount" style="color:var(--text-dim);"></span>
     </div>
     <div class="file-list" id="fileList"></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Step 2 &mdash; Smartsheet Connection</h2>
+  <div class="settings-field">
+    <label for="smToken">API Token</label>
+    <div class="input-row">
+      <input type="password" id="smToken" autocomplete="off" spellcheck="false" placeholder="Paste your Smartsheet API token">
+      <button class="input-toggle" type="button" onclick="toggleTokenVisibility()">show</button>
+    </div>
+    <div class="field-hint">Stored locally in your browser. Shared token &mdash; get it from Rebecca if you don't have one.</div>
+  </div>
+  <div class="settings-field">
+    <label for="smPrincipleId">Principle Sheet ID</label>
+    <div class="input-row">
+      <input type="text" id="smPrincipleId" autocomplete="off" spellcheck="false">
+    </div>
+  </div>
+  <div class="settings-field">
+    <label for="smShadowId">Shadow List Sheet ID</label>
+    <div class="input-row">
+      <input type="text" id="smShadowId" autocomplete="off" spellcheck="false">
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="testBtn" onclick="testConnection()">Test Connection</button>
+  </div>
+  <div class="connection-status idle" id="connStatus">
+    <span class="connection-dot"></span>
+    <span id="connStatusText">Not tested yet</span>
   </div>
 </div>
 
@@ -161,11 +248,22 @@
     <span>Extracted Records</span>
     <span id="recordsTotal" style="color:var(--text-dim);"></span>
   </div>
-  <div id="groupsContainer"></div>
+  <div class="review-tabs" id="reviewTabs">
+    <button class="review-tab active" data-tab="approved" onclick="switchTab('approved')">
+      <span>Approved</span>
+      <span class="tab-count" id="approvedCount">0</span>
+    </button>
+    <button class="review-tab" data-tab="suspected" onclick="switchTab('suspected')">
+      <span>Suspected Duplicates</span>
+      <span class="tab-count" id="suspectedCount">0</span>
+    </button>
+  </div>
+  <div id="approvedPane" class="review-pane"></div>
+  <div id="suspectedPane" class="review-pane hidden"></div>
 </div>
 
 <div class="future-note" id="futureNote" style="display:none;">
-  <strong>Next up:</strong> pushing approved records to Smartsheet, with review for suspected duplicates and Shadow-List cross-referencing. This build verifies parsing only.
+  <strong>Next up:</strong> pushing approved records to Smartsheet, with Shadow-List cross-referencing. The disposition choices you make here (Add Anyway / Skip / Keep in Suspected) will be remembered and applied when push is wired up.
 </div>
 
 <script>
@@ -238,6 +336,27 @@ var MONTH_NAMES = {
 var queuedFiles = [];    // [{ file, name, status }]
 var allRecords  = [];    // flattened list of extracted records
 var stats       = { files: 0, records: 0, warnings: 0, errors: 0 };
+
+// Smartsheet connection + dedup state
+var PROXY_BASE = 'https://smartsheet-proxy.rebecca-91f.workers.dev';
+var DEFAULT_PRINCIPLE_ID = '2C7MJcjV344c5XwJmXhvrh3GP2mX6PRR4x7Wrp61';
+var DEFAULT_SHADOW_ID    = 'rpFHg2Mm68G9x32M55HgX7M37XF5HqvVjmMJh441';
+var LS_KEYS = { token: 'mcl_sm_token', principleId: 'mcl_sm_principle_id', shadowId: 'mcl_sm_shadow_id' };
+var connection = { ok: false, principleSheet: null, principleColMap: null, existingKeyMap: null };
+
+// Dedup fields / normalizers — mirror of the Python tool
+var NARROW_KEY_FIELDS = ['member_id', 'heat_no', 'member_size'];
+var SMARTSHEET_COLS = {
+  member_id: 'Member ID', member_desc: 'Member Description', weld_types: 'Weld Type(s)',
+  acc_rej: 'Acc / Rej', inspection_types: 'Inspection Type(s)', member_size: 'Member Size',
+  heat_no: 'Heat No.', final_acc_date: 'Final Acc. Date', remarks: 'Remarks',
+  inspection_location: 'Inspection Location', date: 'Date', ir_number: 'IR #',
+  cts_representative: 'CTS Representative',
+};
+
+// Per-suspect disposition state: key -> 'skip' | 'keep' | 'add'
+// Populated when user clicks an action on a suspect card.
+var dispositions = {};
 
 // ─────────────────────────────────────────────────────────────
 //  FILE INTAKE
@@ -337,6 +456,7 @@ function clearFiles() {
   queuedFiles = [];
   allRecords = [];
   stats = { files: 0, records: 0, warnings: 0, errors: 0 };
+  dispositions = {};
   renderFileList();
   updateParseBtn();
   dropZone.classList.remove('has-file');
@@ -347,7 +467,10 @@ function clearFiles() {
   document.getElementById('recordsPanel').classList.remove('visible');
   document.getElementById('futureNote').style.display = 'none';
   document.getElementById('logBody').innerHTML = '';
-  document.getElementById('groupsContainer').innerHTML = '';
+  document.getElementById('approvedPane').innerHTML = '';
+  document.getElementById('suspectedPane').innerHTML = '';
+  document.getElementById('approvedCount').textContent = '0';
+  document.getElementById('suspectedCount').textContent = '0';
 }
 
 function renderFileList() {
@@ -375,12 +498,208 @@ function renderFileList() {
 }
 
 function updateParseBtn() {
-  document.getElementById('parseBtn').disabled = queuedFiles.length === 0;
+  var btn = document.getElementById('parseBtn');
+  var hasFiles = queuedFiles.length > 0;
+  var connected = connection.ok === true;
+  if (!hasFiles && !connected) {
+    btn.disabled = true;
+    btn.textContent = 'Parse PDFs';
+  } else if (!connected) {
+    btn.disabled = true;
+    btn.textContent = 'Connect Smartsheet to continue';
+  } else if (!hasFiles) {
+    btn.disabled = true;
+    btn.textContent = 'Parse PDFs';
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Parse PDFs';
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
-//  PARSE PIPELINE
+//  SMARTSHEET CONNECTION + DEDUP
 // ─────────────────────────────────────────────────────────────
+
+// Load saved settings from localStorage on first paint.
+(function initSmartsheetSettings() {
+  try {
+    document.getElementById('smToken').value = localStorage.getItem(LS_KEYS.token) || '';
+    document.getElementById('smPrincipleId').value = localStorage.getItem(LS_KEYS.principleId) || DEFAULT_PRINCIPLE_ID;
+    document.getElementById('smShadowId').value = localStorage.getItem(LS_KEYS.shadowId) || DEFAULT_SHADOW_ID;
+  } catch (e) { /* localStorage unavailable — fine */ }
+  // Persist on every change.
+  document.getElementById('smToken').addEventListener('input', function(e) {
+    try { localStorage.setItem(LS_KEYS.token, e.target.value); } catch (_) {}
+    invalidateConnection();
+  });
+  document.getElementById('smPrincipleId').addEventListener('input', function(e) {
+    try { localStorage.setItem(LS_KEYS.principleId, e.target.value); } catch (_) {}
+    invalidateConnection();
+  });
+  document.getElementById('smShadowId').addEventListener('input', function(e) {
+    try { localStorage.setItem(LS_KEYS.shadowId, e.target.value); } catch (_) {}
+    invalidateConnection();
+  });
+})();
+
+function toggleTokenVisibility() {
+  var input = document.getElementById('smToken');
+  var btn = input.parentElement.querySelector('.input-toggle');
+  if (input.type === 'password') { input.type = 'text'; btn.textContent = 'hide'; }
+  else { input.type = 'password'; btn.textContent = 'show'; }
+}
+
+function invalidateConnection() {
+  if (connection.ok) {
+    connection.ok = false;
+    connection.principleSheet = null;
+    connection.principleColMap = null;
+    connection.existingKeyMap = null;
+    setConnStatus('idle', 'Settings changed — re-test connection to continue.');
+    updateParseBtn();
+  }
+}
+
+function setConnStatus(state, msg) {
+  var el = document.getElementById('connStatus');
+  el.classList.remove('idle', 'testing', 'ok', 'error');
+  el.classList.add(state);
+  document.getElementById('connStatusText').textContent = msg;
+}
+
+async function testConnection() {
+  var token = document.getElementById('smToken').value.trim();
+  var principleId = document.getElementById('smPrincipleId').value.trim();
+  var shadowId = document.getElementById('smShadowId').value.trim();
+  if (!token) { setConnStatus('error', 'API token is empty.'); return; }
+  if (!principleId) { setConnStatus('error', 'Principle Sheet ID is empty.'); return; }
+  if (!shadowId) { setConnStatus('error', 'Shadow List Sheet ID is empty.'); return; }
+
+  var btn = document.getElementById('testBtn');
+  btn.disabled = true;
+  var originalLabel = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner"></span> Testing...';
+  setConnStatus('testing', 'Contacting Smartsheet...');
+
+  try {
+    // Test both sheets. Run in parallel for speed; surface whichever fails first.
+    var [principle, shadow] = await Promise.all([
+      fetchSheet(token, principleId),
+      fetchSheet(token, shadowId),
+    ]);
+    // Cache the Principle sheet's rows and build a narrow-key map.
+    connection.principleSheet = principle;
+    connection.principleColMap = buildColMap(principle.columns || []);
+    connection.existingKeyMap = buildNarrowKeyMap(principle.rows || [], connection.principleColMap);
+    connection.ok = true;
+    var rowCount = (principle.rows || []).length;
+    var shadowRows = (shadow.rows || []).length;
+    setConnStatus('ok', 'Connected. Principle: ' + rowCount + ' rows. Shadow: ' + shadowRows + ' rows.');
+  } catch (e) {
+    connection.ok = false;
+    setConnStatus('error', 'Connection failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+    updateParseBtn();
+  }
+}
+
+async function fetchSheet(token, sheetId) {
+  var url = PROXY_BASE + '/2.0/sheets/' + encodeURIComponent(sheetId);
+  var response;
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+  } catch (networkErr) {
+    throw new Error('Network error — ' + networkErr.message);
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('Authentication failed (HTTP ' + response.status + '). Check the token.');
+  }
+  if (response.status === 404) {
+    throw new Error('Sheet not found (404). Check the sheet ID.');
+  }
+  if (!response.ok) {
+    var body = '';
+    try { body = await response.text(); } catch (_) {}
+    throw new Error('HTTP ' + response.status + (body ? ' — ' + body.slice(0, 120) : ''));
+  }
+  return response.json();
+}
+
+// Map Smartsheet column titles → our internal field keys.
+// Returns { colId -> fieldKey } and { fieldKey -> colId } for lookup either way.
+function buildColMap(columns) {
+  var byId = {};     // colId -> fieldKey
+  var byField = {};  // fieldKey -> colId
+  for (var i = 0; i < columns.length; i++) {
+    var c = columns[i];
+    var title = (c.title || '').trim();
+    // Find our fieldKey whose SMARTSHEET_COLS value matches this title.
+    for (var key in SMARTSHEET_COLS) {
+      if (SMARTSHEET_COLS[key] === title) {
+        byId[c.id] = key;
+        byField[key] = c.id;
+        break;
+      }
+    }
+  }
+  return { byId: byId, byField: byField };
+}
+
+// Normalization helpers — must match the Python tool exactly.
+function normalizeHeat(value) {
+  var v = String(value || '').replace(/\s*\(.*?\)/g, '').trim();
+  v = v.replace(/\.0*$/, '').trim();
+  return v.toUpperCase();
+}
+function normalizeSize(value) {
+  var s = String(value || '').trim();
+  var firstToken = s.split(/\s+/)[0] || s;
+  return firstToken.toUpperCase();
+}
+function normalizeForDedup(key, value) {
+  var v = String(value || '').trim();
+  if (key === 'heat_no')     return normalizeHeat(v);
+  if (key === 'member_size') return normalizeSize(v);
+  if (key === 'member_id')   return v.toUpperCase();
+  return v;
+}
+function narrowKey(rec) {
+  var parts = [];
+  for (var i = 0; i < NARROW_KEY_FIELDS.length; i++) {
+    parts.push(normalizeForDedup(NARROW_KEY_FIELDS[i], rec[NARROW_KEY_FIELDS[i]] || ''));
+  }
+  return parts.join('||');
+}
+
+// Build a map of existing sheet rows by narrow key.
+function buildNarrowKeyMap(sheetRows, colMap) {
+  var map = {};
+  for (var i = 0; i < sheetRows.length; i++) {
+    var row = sheetRows[i];
+    var vals = {};
+    // Initialize every field empty.
+    for (var f in SMARTSHEET_COLS) vals[f] = '';
+    var cells = row.cells || [];
+    for (var c = 0; c < cells.length; c++) {
+      var cell = cells[c];
+      var fieldKey = colMap.byId[cell.columnId];
+      if (!fieldKey) continue;
+      var v = cell.value;
+      if (v === undefined || v === null || v === '') v = cell.displayValue || '';
+      vals[fieldKey] = String(v || '').trim();
+    }
+    if (!vals.member_id) continue;
+    var key = narrowKey(vals);
+    // First row with this key wins (matches Python behavior).
+    if (!(key in map)) map[key] = vals;
+  }
+  return map;
+}
 async function parseAll() {
   var btn = document.getElementById('parseBtn');
   btn.disabled = true;
@@ -388,11 +707,13 @@ async function parseAll() {
 
   allRecords = [];
   stats = { files: 0, records: 0, warnings: 0, errors: 0 };
+  dispositions = {};
   document.getElementById('logBody').innerHTML = '';
   document.getElementById('logPanel').classList.add('visible');
   document.getElementById('summaryBar').classList.remove('visible');
   document.getElementById('recordsPanel').classList.remove('visible');
-  document.getElementById('groupsContainer').innerHTML = '';
+  document.getElementById('approvedPane').innerHTML = '';
+  document.getElementById('suspectedPane').innerHTML = '';
 
   log('Starting — ' + queuedFiles.length + ' file(s) queued', 'info');
 
@@ -940,12 +1261,63 @@ function estimateWidth(s) { return s.length * 5; }
 // ─────────────────────────────────────────────────────────────
 //  RENDERING
 // ─────────────────────────────────────────────────────────────
+
+// Split records into approved vs suspected, then render each pane.
 function renderRecords() {
   if (allRecords.length === 0) return;
-  // Group by IR# + date + CTS rep (sort IR# ascending, then date, then rep).
-  var groups = {};
+
+  // Classify each record by running narrow-key lookup against the
+  // cached Principle sheet's key map.
+  var approved = [];
+  var suspects = [];
+  var keyMap = (connection.existingKeyMap || {});
   for (var i = 0; i < allRecords.length; i++) {
-    var r = allRecords[i];
+    var rec = allRecords[i];
+    var nk = narrowKey(rec);
+    var existing = keyMap[nk];
+    if (existing) {
+      suspects.push({ incoming: rec, existing: existing, narrowKey: nk, suspectId: 's' + i });
+    } else {
+      approved.push(rec);
+    }
+  }
+
+  document.getElementById('recordsTotal').textContent =
+    allRecords.length + ' total · ' + approved.length + ' approved · ' + suspects.length + ' suspected';
+  document.getElementById('approvedCount').textContent = approved.length;
+  document.getElementById('suspectedCount').textContent = suspects.length;
+  var suspectedTab = document.querySelector('.review-tab[data-tab="suspected"]');
+  if (suspects.length > 0) suspectedTab.classList.add('has-suspects');
+  else suspectedTab.classList.remove('has-suspects');
+
+  // Render the approved pane — grouped by IR# + date + inspector, same as M1.
+  document.getElementById('approvedPane').innerHTML = renderApprovedGroups(approved);
+  // Render the suspects pane — flat list of suspect cards, each with actions.
+  document.getElementById('suspectedPane').innerHTML = renderSuspects(suspects);
+
+  // Default to Suspected tab if any exist, so user sees them first.
+  if (suspects.length > 0) switchTab('suspected');
+  else switchTab('approved');
+
+  document.getElementById('recordsPanel').classList.add('visible');
+}
+
+function switchTab(which) {
+  var tabs = document.querySelectorAll('.review-tab');
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tab') === which);
+  }
+  document.getElementById('approvedPane').classList.toggle('hidden', which !== 'approved');
+  document.getElementById('suspectedPane').classList.toggle('hidden', which !== 'suspected');
+}
+
+function renderApprovedGroups(records) {
+  if (records.length === 0) {
+    return '<div class="empty-review">No approved records yet &mdash; everything matched existing rows.</div>';
+  }
+  var groups = {};
+  for (var i = 0; i < records.length; i++) {
+    var r = records[i];
     var key = (r.ir_number || '—') + '|' + (r.date || '—') + '|' + (r.cts_representative || '—');
     if (!groups[key]) groups[key] = { ir: r.ir_number, date: r.date, rep: r.cts_representative, records: [] };
     groups[key].records.push(r);
@@ -958,27 +1330,111 @@ function renderRecords() {
     if (dateA !== dateB) return dateA - dateB;
     return (ga.rep || '').localeCompare(gb.rep || '');
   });
-
-  var panel = document.getElementById('recordsPanel');
-  var container = document.getElementById('groupsContainer');
-  document.getElementById('recordsTotal').textContent = allRecords.length + ' records across ' + keys.length + ' group(s)';
-  container.innerHTML = '';
-
+  var html = '';
   for (var k = 0; k < keys.length; k++) {
     var g = groups[keys[k]];
-    var groupEl = document.createElement('div');
-    groupEl.className = 'group';
     var title = 'IR #' + (g.ir || '—') + ' — ' + (g.date || '—') + ' — ' + (g.rep || '—');
-    groupEl.innerHTML =
-        '<div class="group-header" onclick="toggleGroup(this)">'
-      +   '<span class="gh-caret">&#x25BC;</span>'
-      +   '<span class="gh-title">' + esc(title) + '</span>'
-      +   '<span class="gh-count">' + g.records.length + ' record(s)</span>'
-      + '</div>'
-      + '<div class="group-body">' + renderRecordsTable(g.records) + '</div>';
-    container.appendChild(groupEl);
+    html +=
+        '<div class="group">'
+      +   '<div class="group-header" onclick="toggleGroup(this)">'
+      +     '<span class="gh-caret">&#x25BC;</span>'
+      +     '<span class="gh-title">' + esc(title) + '</span>'
+      +     '<span class="gh-count">' + g.records.length + ' record(s)</span>'
+      +   '</div>'
+      +   '<div class="group-body">' + renderRecordsTable(g.records) + '</div>'
+      + '</div>';
   }
-  panel.classList.add('visible');
+  return html;
+}
+
+function renderSuspects(suspects) {
+  if (suspects.length === 0) {
+    return '<div class="empty-review">No suspected duplicates. All records are unique against the Principle sheet.</div>';
+  }
+  var html = '<div class="suspect-list">';
+  for (var i = 0; i < suspects.length; i++) {
+    html += renderSuspectItem(suspects[i]);
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderSuspectItem(suspect) {
+  var sid = suspect.suspectId;
+  var disp = dispositions[sid] || 'keep'; // default: keep in suspected
+  var inc = suspect.incoming;
+  var ex  = suspect.existing;
+
+  // Fields to display side-by-side.
+  var compareFields = [
+    ['member_id',        'Member ID'],
+    ['member_desc',      'Member Desc'],
+    ['weld_types',       'Weld Type(s)'],
+    ['acc_rej',          'Acc/Rej'],
+    ['inspection_types', 'Inspection Type'],
+    ['member_size',      'Member Size'],
+    ['heat_no',          'Heat No.'],
+    ['remarks',          'Remarks'],
+    ['final_acc_date',   'Final Acc. Date'],
+    ['ir_number',        'IR #'],
+    ['date',             'Date'],
+    ['cts_representative', 'Inspector'],
+  ];
+
+  function renderFields(source, other) {
+    var body = '';
+    for (var i = 0; i < compareFields.length; i++) {
+      var key = compareFields[i][0];
+      var label = compareFields[i][1];
+      var v = source[key] || '';
+      var o = other[key] || '';
+      var isDiff = String(v).trim() !== String(o).trim();
+      var valCls = 'field-val' + (!v ? ' empty' : '') + (isDiff ? ' diff' : '');
+      var shown = v ? esc(v) : '(empty)';
+      body += '<div class="field"><span class="field-key">' + esc(label) + '</span><span class="' + valCls + '">' + shown + '</span></div>';
+    }
+    return body;
+  }
+
+  var dispBadge = '';
+  if (disp === 'add')  dispBadge = '<span class="sh-disposition add">→ add anyway</span>';
+  else if (disp === 'skip') dispBadge = '<span class="sh-disposition skip">→ skip</span>';
+  else dispBadge = '<span class="sh-disposition keep">→ keep in suspected</span>';
+
+  var sourceInfo = ' · ' + esc(inc.source_file || '') + ' p' + (inc.source_page || '?');
+
+  return ''
+    + '<div class="suspect-item ' + (disp === 'skip' ? 'resolved' : '') + '" id="suspect-' + sid + '">'
+    +   '<div class="suspect-header">'
+    +     '<span><span class="sh-id">' + esc(inc.member_id || '—') + '</span>' + sourceInfo + '</span>'
+    +     dispBadge
+    +   '</div>'
+    +   '<div class="suspect-cards">'
+    +     '<div class="suspect-card existing">'
+    +       '<div class="suspect-card-label">Existing on sheet</div>'
+    +       '<div class="suspect-card-body">' + renderFields(ex, inc) + '</div>'
+    +     '</div>'
+    +     '<div class="suspect-card incoming">'
+    +       '<div class="suspect-card-label">Incoming from PDF</div>'
+    +       '<div class="suspect-card-body">' + renderFields(inc, ex) + '</div>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div class="suspect-actions">'
+    +     '<button class="btn-mini ' + (disp === 'skip' ? 'active-skip' : '') + '" onclick="setDisposition(\'' + sid + '\', \'skip\')">Skip</button>'
+    +     '<button class="btn-mini ' + (disp === 'keep' ? 'active-keep' : '') + '" onclick="setDisposition(\'' + sid + '\', \'keep\')">Keep in suspected</button>'
+    +     '<button class="btn-mini ' + (disp === 'add' ? 'active-add' : '') + '" onclick="setDisposition(\'' + sid + '\', \'add\')">Add anyway</button>'
+    +   '</div>'
+    + '</div>';
+}
+
+function setDisposition(suspectId, choice) {
+  dispositions[suspectId] = choice;
+  // Re-render only the affected suspect item.
+  var suspectedPane = document.getElementById('suspectedPane');
+  // Find the current suspect object by id.
+  // We re-render the whole pane for simplicity — suspect count is small.
+  renderRecords();
+  switchTab('suspected');
 }
 
 function toggleGroup(headerEl) {
