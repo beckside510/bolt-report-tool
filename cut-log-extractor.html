@@ -290,8 +290,11 @@ function extractCuts(rawText) {
     '\n'
   );
   text = text.replace(/2118 Rheem Drive[\s\S]*?Fax \(510\) 835-1825\s*\n/g, '\n');
+  // Also strip partial header remnants (HCAI# and Inspection Request no.) that trail
+  // after the footer on pages where a cut splits across a page break
+  text = text.replace(/HCAI#[^\n]*\nInspection Request\s*no\.?[^\n]*\n/g, '\n');
 
-  const cutRegex = /\bCut\s+(\d+)\s*\n([\s\S]*?)(?=\bCut\s+\d+\s*\n|\n6\.\s|\Z)/g;
+  const cutRegex = /\bCut\s+(\d+)\s*\n([\s\S]*?)(?=\bCut\s+\d+\s*\n|\n6\.\s|$)/g;
   const cuts = [];
   let match;
 
