@@ -837,7 +837,7 @@ async function parsePDF(arrayBuffer) {
     }
 
     // Yield between batches
-    if (p % ${PAGE_BATCH} === 0) {
+    if (p % 10 === 0) {
       await new Promise(r => setTimeout(r, 0));
     }
     postMessage({ type: 'progress', page: p, total });
