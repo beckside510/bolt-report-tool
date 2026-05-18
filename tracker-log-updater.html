@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frame Tracker Updater — NorCal Inspection</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg:#0f0f0f; --surface:#1a1a1a; --surface2:#242424; --border:#333;
+  --accent:#e8c547; --accent2:#4ab7e8; --green:#4ae87a; --red:#e84a4a;
+  --orange:#e8944a; --text:#e8e8e8; --text-dim:#888;
+  --mono:'IBM Plex Mono',monospace; --sans:'IBM Plex Sans',sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  padding: 32px 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+/* ── Header ── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.header-icon {
+  font-size: 36px;
+  line-height: 1;
+}
+.header-text h1 {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+}
+.header-text p {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+
+/* ── Instructions ── */
+.instructions {
+  background: rgba(232,197,71,0.07);
+  border: 1px solid rgba(232,197,71,0.2);
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+.instructions strong { color: var(--accent); }
+
+/* ── Panel ── */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.panel h2 {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 14px;
+}
+
+/* ── Token input ── */
+.token-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.token-input {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 9px 12px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.token-input:focus { border-color: var(--accent); }
+.token-status {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.token-status.ok    { color: var(--green); background: rgba(74,232,122,0.1); border: 1px solid rgba(74,232,122,0.2); }
+.token-status.err   { color: var(--red);   background: rgba(232,74,74,0.1);  border: 1px solid rgba(232,74,74,0.2); }
+.token-status.idle  { color: var(--text-dim); background: var(--surface2); border: 1px solid var(--border); }
+.token-status.busy  { color: var(--accent); background: rgba(232,197,71,0.08); border: 1px solid rgba(232,197,71,0.2); }
+
+/* ── Drop zone ── */
+.drop-zone {
+  position: relative;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 36px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.drop-zone input[type=file] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+.drop-zone .drop-icon { font-size: 32px; display: block; margin-bottom: 10px; }
+.drop-zone h3 { font-size: 15px; font-weight: 500; margin-bottom: 5px; }
+.drop-zone p  { font-size: 13px; color: var(--text-dim); }
+.drop-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(232,197,71,0.05);
+}
+.drop-zone.has-file {
+  border-color: var(--green);
+  background: rgba(74,232,122,0.04);
+}
+
+/* ── File list ── */
+.file-list-wrap {
+  margin-top: 14px;
+  display: none;
+}
+.file-list-wrap.visible { display: block; }
+.file-list-header {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+.file-list {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(51,51,51,0.5);
+  font-size: 13px;
+}
+.file-item:last-child { border-bottom: none; }
+.fi-icon { font-size: 14px; flex-shrink: 0; }
+.fi-name { font-family: var(--mono); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fi-status { font-family: var(--mono); font-size: 11px; flex-shrink: 0; }
+.file-item.pending .fi-status { color: var(--orange); }
+.file-item.ok      .fi-status { color: var(--green); }
+.file-item.err     .fi-status { color: var(--red); }
+.file-item.skipped .fi-status { color: var(--text-dim); }
+
+/* ── Progress bar ── */
+.progress-wrap {
+  margin-top: 14px;
+  display: none;
+}
+.progress-wrap.visible { display: block; }
+.progress-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 5px;
+  display: flex;
+  justify-content: space-between;
+}
+.progress-bar-bg {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  height: 6px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  width: 0%;
+  transition: width 0.2s;
+}
+
+/* ── Buttons ── */
+.btn-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.btn {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 11px 22px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn:active:not(:disabled) { transform: scale(0.98); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary {
+  background: var(--accent);
+  color: #0f0f0f;
+}
+.btn-primary:hover:not(:disabled) { opacity: 0.88; }
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn-danger {
+  background: rgba(232,74,74,0.12);
+  color: var(--red);
+  border: 1px solid rgba(232,74,74,0.3);
+  display: none;
+}
+.btn-danger.visible { display: inline-flex; }
+.btn-danger:hover:not(:disabled) { background: rgba(232,74,74,0.2); }
+
+/* ── Spinner ── */
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(15,15,15,0.3);
+  border-top-color: #0f0f0f;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Summary bar ── */
+.summary-bar {
+  display: none;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.summary-bar.visible { display: flex; }
+.stat-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 14px 20px;
+  min-width: 110px;
+  text-align: center;
+}
+.stat-val {
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--accent);
+  line-height: 1;
+}
+.stat-box.green .stat-val { color: var(--green); }
+.stat-box.orange .stat-val { color: var(--orange); }
+.stat-box.red .stat-val { color: var(--red); }
+.stat-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+/* ── Log panel ── */
+.log-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: none;
+  margin-bottom: 20px;
+}
+.log-panel.visible { display: block; }
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.log-body {
+  padding: 10px 14px;
+  max-height: 320px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.log-line { display: flex; gap: 10px; }
+.log-time { color: var(--text-dim); flex-shrink: 0; }
+.log-info    { color: var(--text-dim); }
+.log-success { color: var(--green); }
+.log-error   { color: var(--red); }
+.log-warn    { color: var(--orange); }
+
+/* ── Records panel ── */
+.records-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: none;
+  margin-bottom: 20px;
+}
+.records-panel.visible { display: block; }
+.records-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.records-body {
+  padding: 10px;
+}
+table.records {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+table.records th {
+  text-align: left;
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+table.records td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(51,51,51,0.5);
+  color: var(--text);
+  vertical-align: top;
+}
+table.records tr:last-child td { border-bottom: none; }
+table.records tr.row-ok  td { color: var(--text); }
+table.records tr.row-skip td { color: var(--text-dim); }
+.badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-family: var(--mono);
+}
+.badge-ok   { background: rgba(74,232,122,0.12); color: var(--green); border: 1px solid rgba(74,232,122,0.25); }
+.badge-skip { background: rgba(136,136,136,0.1);  color: var(--text-dim); border: 1px solid var(--border); }
+.badge-err  { background: rgba(232,74,74,0.1);    color: var(--red);   border: 1px solid rgba(232,74,74,0.25); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-icon">&#x1F4CB;</div>
+  <div class="header-text">
+    <h1>Frame Tracker Updater</h1>
+    <p>Reads Member Check Lists from inspection PDFs and updates the INC 8 Frame Tracker in Smartsheet.</p>
+  </div>
+</div>
+
+<div class="instructions">
+  <strong>How to use:</strong> Paste your Smartsheet API token, then drop one or more inspection PDFs onto the drop zone.
+  The tool will parse all Member Check List tables, match accepted items to tracker rows by Remarks reference,
+  update quantities, and write all fields. Only rows with <strong>Acc/Rej = Accepted</strong> (or similar) and a
+  valid Qty are processed. Unmatched rows are skipped and logged.
+</div>
+
+<!-- Step 1: Token -->
+<div class="panel">
+  <h2>Step 1 &mdash; Smartsheet API Token</h2>
+  <div class="token-row">
+    <input type="password" class="token-input" id="tokenInput" placeholder="Paste your Smartsheet API token…" autocomplete="off">
+    <span class="token-status idle" id="tokenStatus">Not verified</span>
+  </div>
+</div>
+
+<!-- Step 2: Drop PDFs -->
+<div class="panel">
+  <h2>Step 2 &mdash; Drop Inspection PDFs</h2>
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="fileInput" accept=".pdf" multiple>
+    <span class="drop-icon">&#x1F4C4;</span>
+    <h3 id="dropTitle">Drop PDFs here, or click to browse</h3>
+    <p id="dropSub">Accepts .pdf files — multiple files OK</p>
+  </div>
+
+  <div class="file-list-wrap" id="fileListWrap">
+    <div class="file-list-header">
+      <span>Queued files</span>
+      <span id="fileCount"></span>
+    </div>
+    <div class="file-list" id="fileList"></div>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-label">
+      <span id="progressLabel">Parsing pages…</span>
+      <span id="progressPct">0%</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progressFill"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Actions -->
+<div class="btn-row">
+  <button class="btn btn-primary" id="runBtn" disabled>&#x25B6; Parse &amp; Push to Smartsheet</button>
+  <button class="btn btn-danger" id="clearBtn">&#x2715; Clear</button>
+</div>
+
+<!-- Summary -->
+<div class="summary-bar" id="summaryBar">
+  <div class="stat-box green">
+    <div class="stat-val" id="statUpdated">0</div>
+    <div class="stat-label">Updated</div>
+  </div>
+  <div class="stat-box orange">
+    <div class="stat-val" id="statSkipped">0</div>
+    <div class="stat-label">Skipped</div>
+  </div>
+  <div class="stat-box red">
+    <div class="stat-val" id="statErrors">0</div>
+    <div class="stat-label">Errors</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-val" id="statParsed">0</div>
+    <div class="stat-label">PDF Pages</div>
+  </div>
+</div>
+
+<!-- Log -->
+<div class="log-panel" id="logPanel">
+  <div class="log-header">
+    <span>Activity Log</span>
+    <span id="logCount"></span>
+  </div>
+  <div class="log-body" id="logBody"></div>
+</div>
+
+<!-- Extracted records preview -->
+<div class="records-panel" id="recordsPanel">
+  <div class="records-panel-header">
+    <span>Extracted Records</span>
+    <span id="recordsCount"></span>
+  </div>
+  <div class="records-body">
+    <table class="records" id="recordsTable">
+      <thead>
+        <tr>
+          <th>Member ID</th>
+          <th>Remarks (PDF)</th>
+          <th>Ref Match</th>
+          <th>Weld Type(s)</th>
+          <th>Insp. Type(s)</th>
+          <th>Qty +</th>
+          <th>Final Acc. Date</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="recordsTbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────
+const PROXY      = 'https://smartsheet-proxy.rebecca-91f.workers.dev';
+const SHEET_ID   = '3688140496654212';
+
+// Smartsheet column IDs (from get_columns)
+const COL = {
+  memberID:        2493442411499396,
+  memberDesc:      6997042038869892,
+  weldTypes:       1367542504656772,
+  inspectionTypes: 5871142132027268,
+  memberSize:      3619342318342020,
+  heatNo:          8122941945712516,
+  totalQty:        2601929284030340,
+  currentQty:      8512903794954116,
+  remarks:         350129470345092,
+  finalAccDate:    4853729097715588,
+  refCol1:         8704460913414020,
+  refCol2:         541686588804996
+};
+
+// ── State ──────────────────────────────────────────────────────────────────
+let queuedFiles  = [];
+let logLines     = 0;
+let isBusy       = false;
+let tokenOk      = false;
+let trackerRows  = []; // [{rowId, refCol1, refCol2, currentQty}, ...]
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function log(msg, type = 'info') {
+  const body = document.getElementById('logBody');
+  const now  = new Date();
+  const ts   = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `<span class="log-time">[${ts}]</span><span class="log-${type}">${esc(msg)}</span>`;
+  body.appendChild(line);
+  body.scrollTop = body.scrollHeight;
+  logLines++;
+  document.getElementById('logCount').textContent = `${logLines} lines`;
+  document.getElementById('logPanel').classList.add('visible');
+}
+
+function normalizeDate(raw) {
+  // Accept: YYYY-MM-DD, Month DD YYYY, MM-DD-YYYY, DD/MM/YYYY variants
+  if (!raw) return '';
+  const s = raw.trim();
+  // Already mm/dd/yyyy
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;
+  // YYYY-MM-DD
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  // Month name: "May 12, 2026" or "12 May 2026"
+  const months = {january:'01',february:'02',march:'03',april:'04',may:'05',june:'06',
+                  july:'07',august:'08',september:'09',october:'10',november:'11',december:'12'};
+  const mdy = s.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (mdy) {
+    const m = months[mdy[1].toLowerCase()];
+    if (m) return `${m}/${String(mdy[2]).padStart(2,'0')}/${mdy[3]}`;
+  }
+  const dmy = s.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+  if (dmy) {
+    const m = months[dmy[2].toLowerCase()];
+    if (m) return `${m}/${String(dmy[1]).padStart(2,'0')}/${dmy[3]}`;
+  }
+  // MM-DD-YYYY
+  const mdy2 = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (mdy2) return `${mdy2[1].padStart(2,'0')}/${mdy2[2].padStart(2,'0')}/${mdy2[3]}`;
+  return s; // return as-is if unrecognized
+}
+
+function isAccepted(val) {
+  if (!val) return false;
+  return /^accept/i.test(val.trim());
+}
+
+// Find best (longest) case-insensitive substring match of any refCol1 inside remarks
+function findRefMatch(remarks, trackerRows) {
+  const r = remarks.toLowerCase();
+  let best = null;
+  let bestLen = 0;
+  for (const row of trackerRows) {
+    const ref = (row.refCol1 || '').toLowerCase();
+    if (!ref) continue;
+    if (r.includes(ref) && ref.length > bestLen) {
+      best = row;
+      bestLen = ref.length;
+    }
+  }
+  return best;
+}
+
+function setProgress(label, pct) {
+  document.getElementById('progressLabel').textContent = label;
+  document.getElementById('progressPct').textContent   = `${Math.round(pct)}%`;
+  document.getElementById('progressFill').style.width  = `${pct}%`;
+}
+
+function updateRunBtn() {
+  document.getElementById('runBtn').disabled = isBusy || !tokenOk || queuedFiles.length === 0;
+}
+
+// ── Token verification ─────────────────────────────────────────────────────
+let tokenTimer = null;
+document.getElementById('tokenInput').addEventListener('input', () => {
+  clearTimeout(tokenTimer);
+  tokenOk = false;
+  updateRunBtn();
+  setTokenStatus('idle', 'Not verified');
+  const val = document.getElementById('tokenInput').value.trim();
+  if (!val) return;
+  setTokenStatus('busy', 'Verifying…');
+  tokenTimer = setTimeout(() => verifyToken(val), 600);
+});
+
+function setTokenStatus(cls, text) {
+  const el = document.getElementById('tokenStatus');
+  el.className = `token-status ${cls}`;
+  el.textContent = text;
+}
+
+async function verifyToken(token) {
+  try {
+    const res = await fetch(`${PROXY}/sheets/${SHEET_ID}?pageSize=1`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      tokenOk = true;
+      setTokenStatus('ok', '✓ Connected');
+      log('Smartsheet connection verified.', 'success');
+    } else {
+      tokenOk = false;
+      setTokenStatus('err', `Error ${res.status}`);
+    }
+  } catch (e) {
+    tokenOk = false;
+    setTokenStatus('err', 'Connection failed');
+  }
+  updateRunBtn();
+}
+
+// ── File intake ────────────────────────────────────────────────────────────
+const dropZone  = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  addFiles([...e.dataTransfer.files].filter(f => f.name.toLowerCase().endsWith('.pdf')));
+});
+fileInput.addEventListener('change', () => {
+  addFiles([...fileInput.files]);
+  fileInput.value = '';
+});
+
+function addFiles(files) {
+  if (!files.length) return;
+  queuedFiles.push(...files);
+  renderFileList();
+  updateRunBtn();
+}
+
+function renderFileList() {
+  const wrap = document.getElementById('fileListWrap');
+  const list = document.getElementById('fileList');
+  if (!queuedFiles.length) { wrap.classList.remove('visible'); return; }
+  wrap.classList.add('visible');
+  document.getElementById('fileCount').textContent = `${queuedFiles.length} file${queuedFiles.length !== 1 ? 's' : ''}`;
+  list.innerHTML = queuedFiles.map((f, i) =>
+    `<div class="file-item pending" id="fi-${i}">
+      <span class="fi-icon">&#x1F4C4;</span>
+      <span class="fi-name">${esc(f.name)}</span>
+      <span class="fi-status">Pending</span>
+    </div>`
+  ).join('');
+  dropZone.classList.add('has-file');
+}
+
+function setFileStatus(idx, cls, label) {
+  const el = document.getElementById(`fi-${idx}`);
+  if (!el) return;
+  el.className = `file-item ${cls}`;
+  el.querySelector('.fi-status').textContent = label;
+}
+
+// ── Web Worker blob ────────────────────────────────────────────────────────
+// The entire PDF parsing logic runs in a Worker so the main thread never blocks.
+const WORKER_SRC = `
+importScripts('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const PAGE_BATCH = 10;
+
+// Normalise a raw string from PDF.js text items
+function clean(s) { return (s||'').replace(/\\s+/g,' ').trim(); }
+
+// ── Member Check List table parser ────────────────────────────────────────
+// Looks for the "MEMBER CHECK LIST" header then reads the table that follows.
+// Columns are detected by x-position of header items on the header row.
+// Each data row maps text items to columns by closest header x.
+
+const KNOWN_HEADERS = [
+  'member id','member description','weld type(s)','acc/rej',
+  'inspection type(s)','member size','heat no.','qty','remarks','final acc. date'
+];
+
+function closestCol(x, cols) {
+  let best = null, bestDist = Infinity;
+  for (const c of cols) {
+    const d = Math.abs(x - c.x);
+    if (d < bestDist) { bestDist = d; best = c; }
+  }
+  return best;
+}
+
+async function parsePDF(arrayBuffer) {
+  const pdf    = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const total  = pdf.numPages;
+  const allRec = [];
+
+  for (let p = 1; p <= total; p++) {
+    try {
+      const page    = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      const items   = content.items.map(i => ({
+        text: clean(i.str),
+        x: Math.round(i.transform[4]),
+        y: Math.round(i.transform[5])
+      })).filter(i => i.text);
+
+      // Group items into lines by y-coordinate (within 3px tolerance)
+      const lineMap = new Map();
+      for (const item of items) {
+        let key = null;
+        for (const [k] of lineMap) {
+          if (Math.abs(k - item.y) <= 3) { key = k; break; }
+        }
+        if (key === null) { key = item.y; lineMap.set(key, []); }
+        lineMap.get(key).push(item);
+      }
+      const lines = [...lineMap.entries()]
+        .sort((a, b) => b[0] - a[0]) // PDF y increases bottom-up → sort desc = top-down
+        .map(([y, its]) => ({ y, items: its.sort((a, b) => a.x - b.x) }));
+
+      // Find "MEMBER CHECK LIST" header line
+      let mclIdx = -1;
+      for (let i = 0; i < lines.length; i++) {
+        const txt = lines[i].items.map(t => t.text).join(' ').toUpperCase();
+        if (txt.includes('MEMBER CHECK LIST')) { mclIdx = i; break; }
+      }
+      if (mclIdx === -1) {
+        // Post per-page progress even if no MCL found
+        postMessage({ type: 'progress', page: p, total });
+        continue;
+      }
+
+      // Find the column header row (next line that contains known header tokens)
+      let hdrIdx = -1;
+      let colDefs = [];
+      for (let i = mclIdx + 1; i < Math.min(mclIdx + 6, lines.length); i++) {
+        const words = lines[i].items.map(it => it.text.toLowerCase());
+        const joined = words.join(' ');
+        if (KNOWN_HEADERS.some(h => joined.includes(h))) {
+          hdrIdx = i;
+          // Build col defs: each header item's text → its x midpoint
+          for (const it of lines[i].items) {
+            if (it.text.trim()) {
+              colDefs.push({ name: it.text.toLowerCase().replace(/\\s+/g,' ').trim(), x: it.x });
+            }
+          }
+          break;
+        }
+      }
+      if (hdrIdx === -1 || !colDefs.length) {
+        postMessage({ type: 'progress', page: p, total });
+        continue;
+      }
+
+      // Read data rows until we hit a clearly non-data line or end of page
+      for (let i = hdrIdx + 1; i < lines.length; i++) {
+        const line = lines[i];
+        const lineText = line.items.map(it => it.text).join(' ').trim();
+        // Stop at conformance / signature blocks
+        if (/conformance|approved document|declare that|reviewed by|equipment used|additional notes/i.test(lineText)) break;
+        if (!lineText) continue;
+
+        // Map each text item to nearest column
+        const row = {};
+        for (const it of line.items) {
+          const col = closestCol(it.x, colDefs);
+          if (!col) continue;
+          const key = col.name;
+          row[key] = row[key] ? row[key] + ' ' + it.text : it.text;
+        }
+
+        // Require at minimum an acc/rej value and member id
+        const accRej   = clean(row['acc/rej'] || row['acc rej'] || '');
+        const memberId = clean(row['member id'] || '');
+        if (!memberId && !accRej) continue;
+
+        allRec.push({
+          memberId:        memberId,
+          memberDesc:      clean(row['member description'] || ''),
+          weldTypes:       clean(row['weld type(s)'] || row['weld types'] || ''),
+          accRej:          accRej,
+          inspectionTypes: clean(row['inspection type(s)'] || row['inspection types'] || ''),
+          memberSize:      clean(row['member size'] || ''),
+          heatNo:          clean(row['heat no.'] || row['heat no'] || ''),
+          qty:             clean(row['qty'] || ''),
+          remarks:         clean(row['remarks'] || ''),
+          finalAccDate:    clean(row['final acc. date'] || row['final acc date'] || ''),
+          sourcePage:      p
+        });
+      }
+    } catch (err) {
+      postMessage({ type: 'pageError', page: p, error: err.message });
+    }
+
+    // Yield between batches
+    if (p % ${PAGE_BATCH} === 0) {
+      await new Promise(r => setTimeout(r, 0));
+    }
+    postMessage({ type: 'progress', page: p, total });
+  }
+
+  pdf.destroy();
+  return allRec;
+}
+
+self.onmessage = async (e) => {
+  const { fileIndex, arrayBuffer } = e.data;
+  try {
+    const records = await parsePDF(arrayBuffer);
+    postMessage({ type: 'done', fileIndex, records });
+  } catch (err) {
+    postMessage({ type: 'error', fileIndex, error: err.message });
+  }
+};
+`;
+
+function makeWorker() {
+  const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
+  return new Worker(URL.createObjectURL(blob));
+}
+
+// ── Parse all PDFs via Worker (sequential per file) ───────────────────────
+function parseFilesViaWorker(files, onProgress, onFileDone, onFileError) {
+  return new Promise(resolve => {
+    let fileIdx   = 0;
+    let allRecs   = [];
+    let totalPages = 0;
+    let donePages  = 0;
+    let worker;
+
+    function next() {
+      if (fileIdx >= files.length) {
+        if (worker) worker.terminate();
+        resolve(allRecs);
+        return;
+      }
+      const f = files[fileIdx];
+      const thisIdx = fileIdx;
+      fileIdx++;
+
+      // Read file as ArrayBuffer on main thread, transfer to worker
+      const reader = new FileReader();
+      reader.onload = evt => {
+        const buf = evt.target.result;
+        if (!worker) worker = makeWorker();
+        worker.onmessage = msg => {
+          const d = msg.data;
+          if (d.type === 'progress') {
+            donePages++;
+            if (d.total && !totalPages) totalPages += d.total;
+            const pct = totalPages ? (donePages / totalPages) * 100 : 0;
+            onProgress(`Parsing ${f.name} — page ${d.page} / ${d.total}`, Math.min(pct, 99));
+          } else if (d.type === 'pageError') {
+            // non-fatal
+          } else if (d.type === 'done') {
+            onFileDone(thisIdx, d.records);
+            allRecs = allRecs.concat(d.records);
+            next();
+          } else if (d.type === 'error') {
+            onFileError(thisIdx, d.error);
+            next();
+          }
+        };
+        worker.postMessage({ fileIndex: thisIdx, arrayBuffer: buf }, [buf]);
+      };
+      reader.readAsArrayBuffer(f);
+    }
+
+    next();
+  });
+}
+
+// ── Load tracker sheet from Smartsheet ────────────────────────────────────
+async function loadTrackerRows(token) {
+  let rows = [];
+  let page = 1;
+  while (true) {
+    const res = await fetch(`${PROXY}/sheets/${SHEET_ID}?pageSize=500&page=${page}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error(`Smartsheet fetch failed: ${res.status}`);
+    const data = await res.json();
+    const sheetRows = data.rows || [];
+    for (const r of sheetRows) {
+      const getCell = colId => (r.cells || []).find(c => c.columnId === colId);
+      rows.push({
+        rowId:      r.id,
+        refCol1:    String(getCell(COL.refCol1)?.value || '').trim(),
+        refCol2:    getCell(COL.refCol2)?.value,
+        currentQty: getCell(COL.currentQty)?.value
+      });
+    }
+    if (data.pageNumber >= data.totalPages) break;
+    page++;
+  }
+  return rows;
+}
+
+// ── Push one row update to Smartsheet ─────────────────────────────────────
+async function pushRowUpdate(token, rowId, cells) {
+  const res = await fetch(`${PROXY}/sheets/${SHEET_ID}/rows`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify([{ id: rowId, cells }])
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`PUT row ${rowId} failed ${res.status}: ${txt.slice(0,120)}`);
+  }
+  return res.json();
+}
+
+// ── Main run ───────────────────────────────────────────────────────────────
+document.getElementById('runBtn').addEventListener('click', run);
+
+async function run() {
+  if (isBusy) return;
+  isBusy = true;
+  updateRunBtn();
+
+  // Reset UI
+  document.getElementById('summaryBar').classList.remove('visible');
+  document.getElementById('logBody').innerHTML = '';
+  document.getElementById('logPanel').classList.remove('visible');
+  document.getElementById('recordsPanel').classList.remove('visible');
+  document.getElementById('recordsTbody').innerHTML = '';
+  document.getElementById('progressWrap').classList.add('visible');
+  document.getElementById('clearBtn').classList.add('visible');
+  logLines = 0;
+
+  const btn   = document.getElementById('runBtn');
+  const token = document.getElementById('tokenInput').value.trim();
+
+  btn.innerHTML = '<span class="spinner"></span> Parsing PDFs…';
+  btn.disabled  = true;
+
+  let cntUpdated = 0, cntSkipped = 0, cntErrors = 0, cntPages = 0;
+
+  try {
+    // 1. Load tracker rows
+    log('Loading tracker rows from Smartsheet…', 'info');
+    trackerRows = await loadTrackerRows(token);
+    log(`Loaded ${trackerRows.length} tracker rows.`, 'success');
+
+    // 2. Parse PDFs via Web Worker
+    log(`Starting parse of ${queuedFiles.length} PDF(s)…`, 'info');
+
+    let allRecords = [];
+
+    allRecords = await parseFilesViaWorker(
+      queuedFiles,
+      (label, pct) => setProgress(label, pct),
+      (idx, recs) => {
+        const pageCount = recs.length > 0 ? recs[recs.length - 1].sourcePage : '?';
+        setFileStatus(idx, 'ok', `${recs.length} rows found`);
+        log(`${queuedFiles[idx].name} → ${recs.length} member row(s) extracted.`, recs.length ? 'success' : 'warn');
+        cntPages += (typeof pageCount === 'number') ? pageCount : 0;
+      },
+      (idx, err) => {
+        setFileStatus(idx, 'err', 'Parse error');
+        log(`${queuedFiles[idx].name} — parse error: ${err}`, 'error');
+        cntErrors++;
+      }
+    );
+
+    setProgress('Parse complete.', 100);
+    log(`Total extracted: ${allRecords.length} member row(s) across all PDFs.`, 'info');
+
+    // 3. Filter & match
+    btn.innerHTML = '<span class="spinner"></span> Pushing to Smartsheet…';
+
+    const tbodyEl = document.getElementById('recordsTbody');
+    let rowsHtml  = '';
+
+    for (const rec of allRecords) {
+      // Filter: must be accepted
+      if (!isAccepted(rec.accRej)) {
+        const reason = `Not accepted (Acc/Rej="${rec.accRej || 'blank'}")`;
+        rowsHtml += buildTableRow(rec, null, 'skip', reason);
+        log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
+        cntSkipped++;
+        continue;
+      }
+
+      // Filter: qty must be present
+      const qtyRaw = rec.qty;
+      const qtyNum = parseFloat(qtyRaw);
+      if (!qtyRaw || isNaN(qtyNum)) {
+        const reason = `Qty blank or missing`;
+        rowsHtml += buildTableRow(rec, null, 'skip', reason);
+        log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
+        cntSkipped++;
+        continue;
+      }
+
+      // Match ref col 1 via remarks
+      if (!rec.remarks) {
+        const reason = 'Remarks empty — cannot match';
+        rowsHtml += buildTableRow(rec, null, 'skip', reason);
+        log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
+        cntSkipped++;
+        continue;
+      }
+
+      const matched = findRefMatch(rec.remarks, trackerRows);
+      if (!matched) {
+        const reason = `No Ref Col 1 match found in Remarks: "${rec.remarks.slice(0,60)}"`;
+        rowsHtml += buildTableRow(rec, null, 'skip', reason);
+        log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
+        cntSkipped++;
+        continue;
+      }
+
+      // Calculate new qty
+      const addAmt    = qtyNum * 0.5;
+      const existQty  = parseFloat(matched.currentQty) || 0;
+      const newQty    = existQty + addAmt;
+      const totalQty  = matched.refCol2 != null ? String(matched.refCol2) : '';
+
+      // Build cells array
+      const cells = [
+        { columnId: COL.memberID,        value: rec.memberId },
+        { columnId: COL.memberDesc,      value: rec.memberDesc },
+        { columnId: COL.weldTypes,       value: rec.weldTypes },
+        { columnId: COL.inspectionTypes, value: rec.inspectionTypes },
+        { columnId: COL.memberSize,      value: rec.memberSize },
+        { columnId: COL.heatNo,          value: rec.heatNo },
+        { columnId: COL.remarks,         value: rec.remarks },
+        { columnId: COL.finalAccDate,    value: normalizeDate(rec.finalAccDate) },
+        { columnId: COL.currentQty,      value: newQty },
+        { columnId: COL.totalQty,        value: totalQty }
+      ];
+
+      try {
+        await pushRowUpdate(token, matched.rowId, cells);
+        // Update our local cache so subsequent records in the same run see the new qty
+        matched.currentQty = newQty;
+        rowsHtml += buildTableRow(rec, matched.refCol1, 'ok', `+${addAmt} → ${newQty}`);
+        log(`OK — ${rec.memberId} matched ${matched.refCol1} → Current Qty ${existQty} + ${addAmt} = ${newQty}`, 'success');
+        cntUpdated++;
+      } catch (err) {
+        rowsHtml += buildTableRow(rec, matched.refCol1, 'err', err.message.slice(0, 80));
+        log(`ERROR — ${rec.memberId} / ${matched.refCol1}: ${err.message}`, 'error');
+        cntErrors++;
+      }
+
+      // Brief pause between writes to respect rate limits
+      await new Promise(r => setTimeout(r, 120));
+    }
+
+    // 4. Render records table
+    tbodyEl.innerHTML = rowsHtml;
+    document.getElementById('recordsCount').textContent = `${allRecords.length} row(s)`;
+    document.getElementById('recordsPanel').classList.add('visible');
+
+    // 5. Summary
+    document.getElementById('statUpdated').textContent = cntUpdated;
+    document.getElementById('statSkipped').textContent = cntSkipped;
+    document.getElementById('statErrors').textContent  = cntErrors;
+    document.getElementById('statParsed').textContent  = document.querySelectorAll('.file-item.ok').length + ' PDFs';
+    document.getElementById('summaryBar').classList.add('visible');
+
+    log(`Done. ${cntUpdated} updated, ${cntSkipped} skipped, ${cntErrors} errors.`,
+        cntErrors ? 'error' : cntSkipped ? 'warn' : 'success');
+
+  } catch (err) {
+    log(`Fatal error: ${err.message}`, 'error');
+  }
+
+  btn.innerHTML = '&#x25B6; Parse &amp; Push to Smartsheet';
+  isBusy = false;
+  updateRunBtn();
+  document.getElementById('progressWrap').classList.remove('visible');
+}
+
+function buildTableRow(rec, refMatch, status, note) {
+  const statusBadge = status === 'ok'
+    ? `<span class="badge badge-ok">Updated</span>`
+    : status === 'err'
+    ? `<span class="badge badge-err">Error</span>`
+    : `<span class="badge badge-skip">Skipped</span>`;
+  const cls = status === 'ok' ? 'row-ok' : 'row-skip';
+  return `<tr class="${cls}">
+    <td>${esc(rec.memberId)}</td>
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(rec.remarks)}</td>
+    <td>${refMatch ? esc(refMatch) : '<span style="color:var(--text-dim)">—</span>'}</td>
+    <td>${esc(rec.weldTypes)}</td>
+    <td>${esc(rec.inspectionTypes)}</td>
+    <td>${esc(rec.qty)}</td>
+    <td>${esc(normalizeDate(rec.finalAccDate))}</td>
+    <td>${statusBadge}<br><span style="color:var(--text-dim);font-size:10px">${esc(note)}</span></td>
+  </tr>`;
+}
+
+// ── Clear ──────────────────────────────────────────────────────────────────
+document.getElementById('clearBtn').addEventListener('click', () => {
+  queuedFiles = [];
+  renderFileList();
+  dropZone.classList.remove('has-file');
+  document.getElementById('summaryBar').classList.remove('visible');
+  document.getElementById('logBody').innerHTML = '';
+  document.getElementById('logPanel').classList.remove('visible');
+  document.getElementById('recordsPanel').classList.remove('visible');
+  document.getElementById('progressWrap').classList.remove('visible');
+  document.getElementById('clearBtn').classList.remove('visible');
+  logLines = 0;
+  updateRunBtn();
+});
+</script>
+</body>
+</html>
