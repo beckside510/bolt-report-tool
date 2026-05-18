@@ -1179,11 +1179,16 @@ async function parseAll() {
   document.getElementById('suspectedPane').innerHTML = '';
 
   log('Starting — ' + queuedFiles.length + ' file(s) queued', 'info');
+  // Update parse button to show running progress.
+  var parseBtn = document.getElementById('parseBtn');
 
   for (var i = 0; i < queuedFiles.length; i++) {
     var q = queuedFiles[i];
     q.status = 'parsing';
-    renderFileList();
+    parseBtn.innerHTML = '<span class="spinner"></span> Parsing ' + (i + 1) + ' / ' + queuedFiles.length + '...';
+    // Re-render file list periodically — for huge batches, doing it
+    // every iteration creates DOM thrash that slows everything down.
+    if (queuedFiles.length <= 50 || i % 10 === 0) renderFileList();
     try {
       var res = await parseOneFile(q.file);
       q.rows = res.records.length;
@@ -1210,8 +1215,14 @@ async function parseAll() {
       console.error(e);
     }
     stats.files++;
-    renderFileList();
+    // Yield to the browser so it can paint progress AND so the GC can
+    // run between files. Without this, a long synchronous-feeling chain
+    // of awaits never gives the runtime a chance to free PDF.js's
+    // accumulating internal buffers, eventually crashing the tab.
+    await new Promise(function(resolve) { setTimeout(resolve, 0); });
   }
+  // Final render after the loop completes.
+  renderFileList();
 
   document.getElementById('statFiles').textContent = stats.files;
   document.getElementById('statRecords').textContent = stats.records;
@@ -1231,48 +1242,62 @@ async function parseAll() {
 
 async function parseOneFile(file) {
   var buf = await file.arrayBuffer();
-  var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  var loadingTask = pdfjsLib.getDocument({ data: buf });
+  var pdf = await loadingTask.promise;
+  // Drop our reference to the buffer — PDF.js has its own internal copy.
+  buf = null;
   var records = [];
   var warnings = [];
-  for (var pn = 1; pn <= pdf.numPages; pn++) {
-    var page = await pdf.getPage(pn);
-    var tc = await page.getTextContent();
-    var joined = tc.items.map(function(i) { return i.str; }).join(' ');
-    if (!/MEMBER\s+CHECK\s+LIST/i.test(joined)) continue;
-    var segments = await extractLineSegments(page);
-    var linesText = reconstructLines(tc.items);
-    var headerFields = extractHeader(linesText);
-    var pageWarnings = [];
-    var tableResult = extractTable(tc.items, segments, pageWarnings);
-    for (var w = 0; w < pageWarnings.length; w++) {
-      warnings.push(file.name + ' p' + pn + ': ' + pageWarnings[w]);
-    }
-    for (var r = 0; r < tableResult.rows.length; r++) {
-      var row = tableResult.rows[r];
-      var remarks = row.remarks || "";
-      if (row.qty && String(row.qty).trim() !== "") {
-        var qtyPart = 'Qty: ' + String(row.qty).trim();
-        remarks = remarks ? qtyPart + ' — ' + remarks : qtyPart;
+  try {
+    for (var pn = 1; pn <= pdf.numPages; pn++) {
+      var page = await pdf.getPage(pn);
+      try {
+        var tc = await page.getTextContent();
+        var joined = tc.items.map(function(i) { return i.str; }).join(' ');
+        if (!/MEMBER\s+CHECK\s+LIST/i.test(joined)) continue;
+        var segments = await extractLineSegments(page);
+        var linesText = reconstructLines(tc.items);
+        var headerFields = extractHeader(linesText);
+        var pageWarnings = [];
+        var tableResult = extractTable(tc.items, segments, pageWarnings);
+        for (var w = 0; w < pageWarnings.length; w++) {
+          warnings.push(file.name + ' p' + pn + ': ' + pageWarnings[w]);
+        }
+        for (var r = 0; r < tableResult.rows.length; r++) {
+          var row = tableResult.rows[r];
+          var remarks = row.remarks || "";
+          if (row.qty && String(row.qty).trim() !== "") {
+            var qtyPart = 'Qty: ' + String(row.qty).trim();
+            remarks = remarks ? qtyPart + ' — ' + remarks : qtyPart;
+          }
+          records.push({
+            member_id:        row.member_id        || "",
+            member_desc:      row.member_desc      || "",
+            weld_types:       row.weld_types       || "",
+            acc_rej:          row.acc_rej          || "",
+            inspection_types: row.inspection_types || "",
+            member_size:      row.member_size      || "",
+            heat_no:          row.heat_no          || "",
+            remarks:          remarks,
+            final_acc_date:   normalizeDate(row.final_acc_date || ""),
+            ir_number:           headerFields.ir_number || "",
+            date:                normalizeDate(headerFields.date || ""),
+            cts_representative:  headerFields.cts_representative || "",
+            inspection_location: headerFields.code || "UNKNOWN",
+            smartsheet_label:    headerFields.label || "UNKNOWN",
+            source_file:         file.name,
+            source_page:         pn,
+          });
+        }
+      } finally {
+        // Release per-page resources (rendered objects, fonts, glyphs).
+        try { page.cleanup(); } catch (_) {}
       }
-      records.push({
-        member_id:        row.member_id        || "",
-        member_desc:      row.member_desc      || "",
-        weld_types:       row.weld_types       || "",
-        acc_rej:          row.acc_rej          || "",
-        inspection_types: row.inspection_types || "",
-        member_size:      row.member_size      || "",
-        heat_no:          row.heat_no          || "",
-        remarks:          remarks,
-        final_acc_date:   normalizeDate(row.final_acc_date || ""),
-        ir_number:           headerFields.ir_number || "",
-        date:                normalizeDate(headerFields.date || ""),
-        cts_representative:  headerFields.cts_representative || "",
-        inspection_location: headerFields.code || "UNKNOWN",
-        smartsheet_label:    headerFields.label || "UNKNOWN",
-        source_file:         file.name,
-        source_page:         pn,
-      });
     }
+  } finally {
+    // Release the entire document and its caches.
+    try { await pdf.destroy(); } catch (_) {}
+    try { await loadingTask.destroy(); } catch (_) {}
   }
   return { records: records, warnings: warnings };
 }
