@@ -510,6 +510,7 @@ table.records tr.row-skip td { color: var(--text-dim); }
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 // ── Constants ──────────────────────────────────────────────────────────────
 const PROXY      = 'https://smartsheet-proxy.rebecca-91f.workers.dev/2.0';
@@ -703,21 +704,12 @@ function setFileStatus(idx, cls, label) {
   el.querySelector('.fi-status').textContent = label;
 }
 
-// ── Web Worker blob ────────────────────────────────────────────────────────
-// The entire PDF parsing logic runs in a Worker so the main thread never blocks.
-const WORKER_SRC = `
-importScripts('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// ── PDF.js setup ───────────────────────────────────────────────────────────
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-const PAGE_BATCH = 10;
-
-// Normalise a raw string from PDF.js text items
-function clean(s) { return (s||'').replace(/\\s+/g,' ').trim(); }
-
-// ── Member Check List table parser ────────────────────────────────────────
-// Looks for the "MEMBER CHECK LIST" header then reads the table that follows.
-// Columns are detected by x-position of header items on the header row.
-// Each data row maps text items to columns by closest header x.
+// ── PDF parsing helpers ────────────────────────────────────────────────────
+function cleanStr(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
 
 const KNOWN_HEADERS = [
   'member id','member description','weld type(s)','acc/rej',
@@ -733,209 +725,138 @@ function closestCol(x, cols) {
   return best;
 }
 
-async function parsePDF(arrayBuffer) {
-  const pdf    = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const total  = pdf.numPages;
-  const allRec = [];
+function extractMCLFromLines(lines, pageNum) {
+  const recs = [];
+  let mclIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const txt = lines[i].items.map(t => t.text).join(' ').toUpperCase();
+    if (txt.includes('MEMBER CHECK LIST')) { mclIdx = i; break; }
+  }
+  if (mclIdx === -1) return recs;
 
-  for (let p = 1; p <= total; p++) {
+  let hdrIdx = -1, colDefs = [];
+  for (let i = mclIdx + 1; i < Math.min(mclIdx + 6, lines.length); i++) {
+    const joined = lines[i].items.map(it => it.text.toLowerCase()).join(' ');
+    if (KNOWN_HEADERS.some(h => joined.includes(h))) {
+      hdrIdx = i;
+      for (const it of lines[i].items) {
+        if (it.text.trim()) {
+          colDefs.push({ name: it.text.toLowerCase().replace(/\s+/g, ' ').trim(), x: it.x });
+        }
+      }
+      break;
+    }
+  }
+  if (hdrIdx === -1 || !colDefs.length) return recs;
+
+  for (let i = hdrIdx + 1; i < lines.length; i++) {
+    const lineText = lines[i].items.map(it => it.text).join(' ').trim();
+    if (/conformance|approved document|declare that|reviewed by|equipment used|additional notes/i.test(lineText)) break;
+    if (!lineText) continue;
+
+    const row = {};
+    for (const it of lines[i].items) {
+      const col = closestCol(it.x, colDefs);
+      if (!col) continue;
+      row[col.name] = row[col.name] ? row[col.name] + ' ' + it.text : it.text;
+    }
+
+    const accRej   = cleanStr(row['acc/rej'] || row['acc rej'] || '');
+    const memberId = cleanStr(row['member id'] || '');
+    if (!memberId && !accRej) continue;
+
+    recs.push({
+      memberId:        memberId,
+      memberDesc:      cleanStr(row['member description'] || ''),
+      weldTypes:       cleanStr(row['weld type(s)'] || row['weld types'] || ''),
+      accRej:          accRej,
+      inspectionTypes: cleanStr(row['inspection type(s)'] || row['inspection types'] || ''),
+      memberSize:      cleanStr(row['member size'] || ''),
+      heatNo:          cleanStr(row['heat no.'] || row['heat no'] || ''),
+      qty:             cleanStr(row['qty'] || ''),
+      remarks:         cleanStr(row['remarks'] || ''),
+      finalAccDate:    cleanStr(row['final acc. date'] || row['final acc date'] || ''),
+      sourcePage:      pageNum
+    });
+  }
+  return recs;
+}
+
+// ── Parse all PDFs on main thread with yields every 10 pages ──────────────
+async function parseAllFiles(files, onProgress, onFileDone, onFileError) {
+  const allRecs = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
     try {
-      const page    = await pdf.getPage(p);
-      const content = await page.getTextContent();
-      const items   = content.items.map(i => ({
-        text: clean(i.str),
-        x: Math.round(i.transform[4]),
-        y: Math.round(i.transform[5])
-      })).filter(i => i.text);
+      const buf = await f.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      const total = pdf.numPages;
+      const fileRecs = [];
 
-      // Group items into lines by y-coordinate (within 3px tolerance)
-      const lineMap = new Map();
-      for (const item of items) {
-        let key = null;
-        for (const [k] of lineMap) {
-          if (Math.abs(k - item.y) <= 3) { key = k; break; }
-        }
-        if (key === null) { key = item.y; lineMap.set(key, []); }
-        lineMap.get(key).push(item);
-      }
-      const lines = [...lineMap.entries()]
-        .sort((a, b) => b[0] - a[0]) // PDF y increases bottom-up → sort desc = top-down
-        .map(([y, its]) => ({ y, items: its.sort((a, b) => a.x - b.x) }));
+      for (let p = 1; p <= total; p++) {
+        try {
+          const page    = await pdf.getPage(p);
+          const content = await page.getTextContent();
+          const items   = content.items.map(i => ({
+            text: cleanStr(i.str),
+            x: Math.round(i.transform[4]),
+            y: Math.round(i.transform[5])
+          })).filter(i => i.text);
 
-      // Find "MEMBER CHECK LIST" header line
-      let mclIdx = -1;
-      for (let i = 0; i < lines.length; i++) {
-        const txt = lines[i].items.map(t => t.text).join(' ').toUpperCase();
-        if (txt.includes('MEMBER CHECK LIST')) { mclIdx = i; break; }
-      }
-      if (mclIdx === -1) {
-        // Post per-page progress even if no MCL found
-        postMessage({ type: 'progress', page: p, total });
-        continue;
-      }
-
-      // Find the column header row (next line that contains known header tokens)
-      let hdrIdx = -1;
-      let colDefs = [];
-      for (let i = mclIdx + 1; i < Math.min(mclIdx + 6, lines.length); i++) {
-        const words = lines[i].items.map(it => it.text.toLowerCase());
-        const joined = words.join(' ');
-        if (KNOWN_HEADERS.some(h => joined.includes(h))) {
-          hdrIdx = i;
-          // Build col defs: each header item's text → its x midpoint
-          for (const it of lines[i].items) {
-            if (it.text.trim()) {
-              colDefs.push({ name: it.text.toLowerCase().replace(/\\s+/g,' ').trim(), x: it.x });
+          // Group into lines by y-coordinate (3px tolerance)
+          const lineMap = new Map();
+          for (const item of items) {
+            let key = null;
+            for (const [k] of lineMap) {
+              if (Math.abs(k - item.y) <= 3) { key = k; break; }
             }
+            if (key === null) { key = item.y; lineMap.set(key, []); }
+            lineMap.get(key).push(item);
           }
-          break;
-        }
-      }
-      if (hdrIdx === -1 || !colDefs.length) {
-        postMessage({ type: 'progress', page: p, total });
-        continue;
-      }
+          const lines = [...lineMap.entries()]
+            .sort((a, b) => b[0] - a[0])
+            .map(([y, its]) => ({ y, items: its.sort((a, b) => a.x - b.x) }));
 
-      // Read data rows until we hit a clearly non-data line or end of page
-      for (let i = hdrIdx + 1; i < lines.length; i++) {
-        const line = lines[i];
-        const lineText = line.items.map(it => it.text).join(' ').trim();
-        // Stop at conformance / signature blocks
-        if (/conformance|approved document|declare that|reviewed by|equipment used|additional notes/i.test(lineText)) break;
-        if (!lineText) continue;
-
-        // Map each text item to nearest column
-        const row = {};
-        for (const it of line.items) {
-          const col = closestCol(it.x, colDefs);
-          if (!col) continue;
-          const key = col.name;
-          row[key] = row[key] ? row[key] + ' ' + it.text : it.text;
+          fileRecs.push(...extractMCLFromLines(lines, p));
+        } catch (e) {
+          // non-fatal page error, continue
         }
 
-        // Require at minimum an acc/rej value and member id
-        const accRej   = clean(row['acc/rej'] || row['acc rej'] || '');
-        const memberId = clean(row['member id'] || '');
-        if (!memberId && !accRej) continue;
+        onProgress(`Parsing ${f.name} — page ${p} / ${total}`, ((fi / files.length) + (p / total / files.length)) * 100);
 
-        allRec.push({
-          memberId:        memberId,
-          memberDesc:      clean(row['member description'] || ''),
-          weldTypes:       clean(row['weld type(s)'] || row['weld types'] || ''),
-          accRej:          accRej,
-          inspectionTypes: clean(row['inspection type(s)'] || row['inspection types'] || ''),
-          memberSize:      clean(row['member size'] || ''),
-          heatNo:          clean(row['heat no.'] || row['heat no'] || ''),
-          qty:             clean(row['qty'] || ''),
-          remarks:         clean(row['remarks'] || ''),
-          finalAccDate:    clean(row['final acc. date'] || row['final acc date'] || ''),
-          sourcePage:      p
-        });
+        // Yield to browser every 10 pages to stay responsive
+        if (p % 10 === 0) await new Promise(r => setTimeout(r, 0));
       }
+
+      pdf.destroy();
+      onFileDone(fi, fileRecs);
+      allRecs.push(...fileRecs);
     } catch (err) {
-      postMessage({ type: 'pageError', page: p, error: err.message });
+      onFileError(fi, err.message);
     }
-
-    // Yield between batches
-    if (p % 10 === 0) {
-      await new Promise(r => setTimeout(r, 0));
-    }
-    postMessage({ type: 'progress', page: p, total });
   }
-
-  pdf.destroy();
-  return allRec;
-}
-
-self.onmessage = async (e) => {
-  const { fileIndex, arrayBuffer } = e.data;
-  try {
-    const records = await parsePDF(arrayBuffer);
-    postMessage({ type: 'done', fileIndex, records });
-  } catch (err) {
-    postMessage({ type: 'error', fileIndex, error: err.message });
-  }
-};
-`;
-
-function makeWorker() {
-  const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
-  return new Worker(URL.createObjectURL(blob));
-}
-
-// ── Parse all PDFs via Worker (sequential per file) ───────────────────────
-function parseFilesViaWorker(files, onProgress, onFileDone, onFileError) {
-  return new Promise(resolve => {
-    let fileIdx   = 0;
-    let allRecs   = [];
-    let totalPages = 0;
-    let donePages  = 0;
-    let worker;
-
-    function next() {
-      if (fileIdx >= files.length) {
-        if (worker) worker.terminate();
-        resolve(allRecs);
-        return;
-      }
-      const f = files[fileIdx];
-      const thisIdx = fileIdx;
-      fileIdx++;
-
-      // Read file as ArrayBuffer on main thread, transfer to worker
-      const reader = new FileReader();
-      reader.onload = evt => {
-        const buf = evt.target.result;
-        if (!worker) worker = makeWorker();
-        worker.onmessage = msg => {
-          const d = msg.data;
-          if (d.type === 'progress') {
-            donePages++;
-            if (d.total && !totalPages) totalPages += d.total;
-            const pct = totalPages ? (donePages / totalPages) * 100 : 0;
-            onProgress(`Parsing ${f.name} — page ${d.page} / ${d.total}`, Math.min(pct, 99));
-          } else if (d.type === 'pageError') {
-            // non-fatal
-          } else if (d.type === 'done') {
-            onFileDone(thisIdx, d.records);
-            allRecs = allRecs.concat(d.records);
-            next();
-          } else if (d.type === 'error') {
-            onFileError(thisIdx, d.error);
-            next();
-          }
-        };
-        worker.postMessage({ fileIndex: thisIdx, arrayBuffer: buf }, [buf]);
-      };
-      reader.readAsArrayBuffer(f);
-    }
-
-    next();
-  });
+  return allRecs;
 }
 
 // ── Load tracker sheet from Smartsheet ────────────────────────────────────
 async function loadTrackerRows(token) {
-  let rows = [];
-  let page = 1;
-  while (true) {
-    const res = await fetch(`${PROXY}/sheets/${SHEET_ID}?pageSize=500&page=${page}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+  const rows = [];
+  // Single request with high pageSize handles up to 10,000 rows.
+  // Smartsheet's max pageSize is 10000.
+  const res = await fetch(`${PROXY}/sheets/${SHEET_ID}?pageSize=10000`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error(`Smartsheet fetch failed: ${res.status}`);
+  const data = await res.json();
+  const sheetRows = data.rows || [];
+  for (const r of sheetRows) {
+    const getCell = colId => (r.cells || []).find(c => c.columnId === colId);
+    rows.push({
+      rowId:      r.id,
+      refCol1:    String(getCell(COL.refCol1)?.value || '').trim(),
+      refCol2:    getCell(COL.refCol2)?.value,
+      currentQty: getCell(COL.currentQty)?.value
     });
-    if (!res.ok) throw new Error(`Smartsheet fetch failed: ${res.status}`);
-    const data = await res.json();
-    const sheetRows = data.rows || [];
-    for (const r of sheetRows) {
-      const getCell = colId => (r.cells || []).find(c => c.columnId === colId);
-      rows.push({
-        rowId:      r.id,
-        refCol1:    String(getCell(COL.refCol1)?.value || '').trim(),
-        refCol2:    getCell(COL.refCol2)?.value,
-        currentQty: getCell(COL.currentQty)?.value
-      });
-    }
-    if (data.pageNumber >= data.totalPages) break;
-    page++;
   }
   return rows;
 }
@@ -994,14 +915,12 @@ async function run() {
 
     let allRecords = [];
 
-    allRecords = await parseFilesViaWorker(
+    allRecords = await parseAllFiles(
       queuedFiles,
-      (label, pct) => setProgress(label, pct),
+      (label, pct) => setProgress(label, Math.min(pct, 99)),
       (idx, recs) => {
-        const pageCount = recs.length > 0 ? recs[recs.length - 1].sourcePage : '?';
         setFileStatus(idx, 'ok', `${recs.length} rows found`);
         log(`${queuedFiles[idx].name} → ${recs.length} member row(s) extracted.`, recs.length ? 'success' : 'warn');
-        cntPages += (typeof pageCount === 'number') ? pageCount : 0;
       },
       (idx, err) => {
         setFileStatus(idx, 'err', 'Parse error');
