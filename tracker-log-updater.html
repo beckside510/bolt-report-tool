@@ -711,74 +711,263 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 // ── PDF parsing helpers ────────────────────────────────────────────────────
 function cleanStr(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
 
-const KNOWN_HEADERS = [
-  'member id','member description','weld type(s)','acc/rej',
-  'inspection type(s)','member size','heat no.','qty','remarks','final acc. date'
-];
-
-function closestCol(x, cols) {
-  let best = null, bestDist = Infinity;
-  for (const c of cols) {
-    const d = Math.abs(x - c.x);
-    if (d < bestDist) { bestDist = d; best = c; }
-  }
-  return best;
+// Maps a normalised header-text fragment to our internal record field name.
+function fieldFromHeader(headerText) {
+  const t = headerText.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (t.includes('member id'))                                  return 'memberId';
+  if (t.includes('member description') || t === 'description')  return 'memberDesc';
+  if (t.includes('weld type'))                                  return 'weldTypes';
+  if (t.includes('acc/rej') || t.includes('acc rej'))           return 'accRej';
+  if (t.includes('inspection type'))                            return 'inspectionTypes';
+  if (t.includes('member size') ||
+      (t.includes('size') && !t.includes('heat')))              return 'memberSize';
+  if (t.includes('heat no') || t === 'heat')                    return 'heatNo';
+  if (t === 'qty' || t.startsWith('qty'))                       return 'qty';
+  if (t.includes('remark'))                                     return 'remarks';
+  if (t.includes('final acc'))                                  return 'finalAccDate';
+  return null;
 }
 
-function extractMCLFromLines(lines, pageNum) {
-  const recs = [];
-  let mclIdx = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const txt = lines[i].items.map(t => t.text).join(' ').toUpperCase();
-    if (txt.includes('MEMBER CHECK LIST')) { mclIdx = i; break; }
+// Cluster 1-D coordinates within `tol` units. Returns array of mean values.
+function clusterByCoord(arr, tol) {
+  if (!arr.length) return [];
+  const sorted  = [...arr].sort((a, b) => a - b);
+  const groups  = [[sorted[0]]];
+  for (let i = 1; i < sorted.length; i++) {
+    const x    = sorted[i];
+    const last = groups[groups.length - 1];
+    const mean = last.reduce((s, v) => s + v, 0) / last.length;
+    if (Math.abs(x - mean) <= tol) last.push(x);
+    else groups.push([x]);
   }
-  if (mclIdx === -1) return recs;
+  return groups.map(g => g.reduce((s, v) => s + v, 0) / g.length);
+}
 
-  let hdrIdx = -1, colDefs = [];
-  for (let i = mclIdx + 1; i < Math.min(mclIdx + 6, lines.length); i++) {
-    const joined = lines[i].items.map(it => it.text.toLowerCase()).join(' ');
-    if (KNOWN_HEADERS.some(h => joined.includes(h))) {
-      hdrIdx = i;
-      for (const it of lines[i].items) {
-        if (it.text.trim()) {
-          colDefs.push({ name: it.text.toLowerCase().replace(/\s+/g, ' ').trim(), x: it.x });
+// Extract every line segment drawn on the page by walking the operator list.
+// Tracks CTM transforms (save/restore/transform) and handles moveTo/lineTo,
+// rectangle decomposition, and constructPath sub-ops. Coordinates returned
+// are in PDF page space (y increases upward).
+async function extractLineSegments(page) {
+  const opList   = await page.getOperatorList();
+  const OPS      = pdfjsLib.OPS;
+  const segments = [];
+
+  let ctm        = [1, 0, 0, 1, 0, 0];
+  const ctmStack = [];
+
+  const multiply = (a, b) => [
+    a[0]*b[0] + a[2]*b[1],
+    a[1]*b[0] + a[3]*b[1],
+    a[0]*b[2] + a[2]*b[3],
+    a[1]*b[2] + a[3]*b[3],
+    a[0]*b[4] + a[2]*b[5] + a[4],
+    a[1]*b[4] + a[3]*b[5] + a[5]
+  ];
+  const apply = (m, x, y) => [ m[0]*x + m[2]*y + m[4], m[1]*x + m[3]*y + m[5] ];
+
+  let cpx = 0, cpy = 0;
+
+  function emitMove(x, y)   { cpx = x; cpy = y; }
+  function emitLine(x, y)   { segments.push({ x1: cpx, y1: cpy, x2: x, y2: y }); cpx = x; cpy = y; }
+  function emitRect(x, y, w, h) {
+    const [x0, y0] = apply(ctm, x, y);
+    const [x1, y1] = apply(ctm, x + w, y);
+    const [x2, y2] = apply(ctm, x + w, y + h);
+    const [x3, y3] = apply(ctm, x,     y + h);
+    segments.push({ x1: x0, y1: y0, x2: x1, y2: y1 });
+    segments.push({ x1: x1, y1: y1, x2: x2, y2: y2 });
+    segments.push({ x1: x2, y1: y2, x2: x3, y2: y3 });
+    segments.push({ x1: x3, y1: y3, x2: x0, y2: y0 });
+    cpx = x0; cpy = y0;
+  }
+
+  for (let i = 0; i < opList.fnArray.length; i++) {
+    const fn   = opList.fnArray[i];
+    const args = opList.argsArray[i];
+
+    if (fn === OPS.save) {
+      ctmStack.push([...ctm]);
+    } else if (fn === OPS.restore) {
+      if (ctmStack.length) ctm = ctmStack.pop();
+    } else if (fn === OPS.transform) {
+      ctm = multiply(ctm, args);
+    } else if (fn === OPS.moveTo) {
+      const [x, y] = apply(ctm, args[0], args[1]); emitMove(x, y);
+    } else if (fn === OPS.lineTo) {
+      const [x, y] = apply(ctm, args[0], args[1]); emitLine(x, y);
+    } else if (fn === OPS.rectangle) {
+      emitRect(args[0], args[1], args[2], args[3]);
+    } else if (fn === OPS.constructPath) {
+      // args = [subFnArray, subArgsArray] (some PDF.js versions also have a 3rd minMax entry)
+      const subFns  = args[0];
+      const subArgs = args[1];
+      let ai = 0;
+      for (let k = 0; k < subFns.length; k++) {
+        const sfn = subFns[k];
+        if (sfn === OPS.moveTo) {
+          const [x, y] = apply(ctm, subArgs[ai], subArgs[ai+1]); emitMove(x, y); ai += 2;
+        } else if (sfn === OPS.lineTo) {
+          const [x, y] = apply(ctm, subArgs[ai], subArgs[ai+1]); emitLine(x, y); ai += 2;
+        } else if (sfn === OPS.rectangle) {
+          emitRect(subArgs[ai], subArgs[ai+1], subArgs[ai+2], subArgs[ai+3]); ai += 4;
+        } else if (sfn === OPS.curveTo) {
+          ai += 6;
+        } else if (sfn === OPS.curveTo2 || sfn === OPS.curveTo3) {
+          ai += 4;
+        } else if (sfn === OPS.closePath) {
+          // no-op for our purposes
         }
       }
-      break;
     }
   }
-  if (hdrIdx === -1 || !colDefs.length) return recs;
+  return segments;
+}
 
-  for (let i = hdrIdx + 1; i < lines.length; i++) {
-    const lineText = lines[i].items.map(it => it.text).join(' ').trim();
-    if (/conformance|approved document|declare that|reviewed by|equipment used|additional notes/i.test(lineText)) break;
-    if (!lineText) continue;
-
-    const row = {};
-    for (const it of lines[i].items) {
-      const col = closestCol(it.x, colDefs);
-      if (!col) continue;
-      row[col.name] = row[col.name] ? row[col.name] + ' ' + it.text : it.text;
+// Filter and split segments into near-horizontal and near-vertical.
+function classifySegments(segments) {
+  const horiz = [], vert = [];
+  const tol = 0.5; // px slack for "perfectly" horizontal/vertical
+  for (const s of segments) {
+    const dx = Math.abs(s.x2 - s.x1);
+    const dy = Math.abs(s.y2 - s.y1);
+    if (dy <= tol && dx > 2) {
+      horiz.push({ y: (s.y1 + s.y2) / 2, x1: Math.min(s.x1, s.x2), x2: Math.max(s.x1, s.x2) });
+    } else if (dx <= tol && dy > 2) {
+      vert.push({ x: (s.x1 + s.x2) / 2, y1: Math.min(s.y1, s.y2), y2: Math.max(s.y1, s.y2) });
     }
-
-    const accRej   = cleanStr(row['acc/rej'] || row['acc rej'] || '');
-    const memberId = cleanStr(row['member id'] || '');
-    if (!memberId && !accRej) continue;
-
-    recs.push({
-      memberId:        memberId,
-      memberDesc:      cleanStr(row['member description'] || ''),
-      weldTypes:       cleanStr(row['weld type(s)'] || row['weld types'] || ''),
-      accRej:          accRej,
-      inspectionTypes: cleanStr(row['inspection type(s)'] || row['inspection types'] || ''),
-      memberSize:      cleanStr(row['member size'] || ''),
-      heatNo:          cleanStr(row['heat no.'] || row['heat no'] || ''),
-      qty:             cleanStr(row['qty'] || ''),
-      remarks:         cleanStr(row['remarks'] || ''),
-      finalAccDate:    cleanStr(row['final acc. date'] || row['final acc date'] || ''),
-      sourcePage:      pageNum
-    });
   }
+  return { horiz, vert };
+}
+
+// ── Member Check List extraction (border-based) ───────────────────────────
+async function extractMCLFromPage(page, pageNum) {
+  const recs    = [];
+  const content = await page.getTextContent();
+  // Text items: keep raw transform[5] (y in PDF space, bottom-up)
+  const items = content.items.map(it => ({
+    text: cleanStr(it.str),
+    x: it.transform[4],
+    xRight: it.transform[4] + (it.width || 0),
+    y: it.transform[5],
+    width: it.width || 0,
+    height: it.height || 0
+  })).filter(it => it.text);
+
+  // Locate "MEMBER CHECK LIST" header text
+  const mcl = items.find(it => /MEMBER\s+CHECK\s+LIST/i.test(it.text));
+  if (!mcl) return recs;
+  const mclY = mcl.y;
+
+  // Bottom-of-region cutoff: first footer-keyword item below the MCL header.
+  // The table is bounded above by `mclY` and below by the lowest footer/notes y.
+  const FOOTER_PATTERNS = /^(notes|conformance|plans dated|equipment used|additional notes|reviewed by|i hereby declare)/i;
+  let footerY = -Infinity;
+  for (const it of items) {
+    if (it.y >= mclY) continue;       // must be below the MCL header
+    if (FOOTER_PATTERNS.test(it.text)) {
+      if (it.y > footerY) footerY = it.y; // pick highest (closest to table)
+    }
+  }
+  // If we can't find a footer keyword, just use page bottom (y = 0)
+  if (footerY === -Infinity) footerY = 0;
+
+  // Extract line segments and classify
+  const segments      = await extractLineSegments(page);
+  const { horiz, vert } = classifySegments(segments);
+
+  // Region predicate: line midpoint between footerY (exclusive) and mclY (exclusive)
+  const inRegion = y => y > footerY && y < mclY;
+
+  // Filter to the MCL region
+  const hInRegion = horiz.filter(h => inRegion(h.y));
+  const vInRegion = vert.filter(v => v.y2 > footerY && v.y1 < mclY);
+
+  if (!hInRegion.length || !vInRegion.length) return recs;
+
+  // Cluster to get unique row & column boundaries
+  const rowBoundsY = clusterByCoord(hInRegion.map(h => h.y),  2).sort((a, b) => b - a); // top→bottom
+  const colBoundsX = clusterByCoord(vInRegion.map(v => v.x),  2).sort((a, b) => a - b); // left→right
+
+  // Need at least 2 rows and 2 columns to form a grid
+  if (rowBoundsY.length < 2 || colBoundsX.length < 2) return recs;
+
+  // Cells: row i is the band between rowBoundsY[i] (top) and rowBoundsY[i+1] (bottom)
+  //        col j is the band between colBoundsX[j] (left) and colBoundsX[j+1] (right)
+  const nRows = rowBoundsY.length - 1;
+  const nCols = colBoundsX.length - 1;
+  const grid  = Array.from({ length: nRows }, () => Array(nCols).fill(''));
+
+  function cellForPoint(x, y) {
+    // Find row: top > y > bottom
+    let r = -1;
+    for (let i = 0; i < nRows; i++) {
+      if (y < rowBoundsY[i] && y > rowBoundsY[i+1]) { r = i; break; }
+    }
+    if (r === -1) return null;
+    // Find col: left < x < right
+    let c = -1;
+    for (let j = 0; j < nCols; j++) {
+      if (x >= colBoundsX[j] && x <= colBoundsX[j+1]) { c = j; break; }
+    }
+    if (c === -1) return null;
+    return [r, c];
+  }
+
+  // Place text items
+  for (const it of items) {
+    if (it.y >= mclY || it.y <= footerY) continue;
+    // Use the item's left edge + small offset to bias into its cell
+    const cx = it.x + Math.min(it.width / 2, 2);
+    const cell = cellForPoint(cx, it.y + (it.height || 0) / 2);
+    if (!cell) {
+      // Fallback: try the right edge in case text starts on a border
+      const cell2 = cellForPoint(it.x + 1, it.y + (it.height || 0) / 2);
+      if (!cell2) continue;
+      const [r2, c2] = cell2;
+      grid[r2][c2] = grid[r2][c2] ? grid[r2][c2] + ' ' + it.text : it.text;
+      continue;
+    }
+    const [r, c] = cell;
+    grid[r][c] = grid[r][c] ? grid[r][c] + ' ' + it.text : it.text;
+  }
+
+  // Identify the header row: the row with the most fieldFromHeader matches
+  let hdrRow = -1, hdrMatches = 0;
+  const colMap = new Array(nCols).fill(null);
+  for (let r = 0; r < nRows; r++) {
+    const tmpMap = new Array(nCols).fill(null);
+    let matches = 0;
+    for (let c = 0; c < nCols; c++) {
+      const field = fieldFromHeader(grid[r][c]);
+      if (field) { tmpMap[c] = field; matches++; }
+    }
+    if (matches > hdrMatches) {
+      hdrMatches = matches;
+      hdrRow     = r;
+      for (let c = 0; c < nCols; c++) colMap[c] = tmpMap[c];
+    }
+  }
+  if (hdrRow === -1 || hdrMatches < 3) return recs;
+
+  // Read data rows (everything below the header row in top-down order)
+  for (let r = hdrRow + 1; r < nRows; r++) {
+    const rec = {
+      memberId: '', memberDesc: '', weldTypes: '', accRej: '',
+      inspectionTypes: '', memberSize: '', heatNo: '', qty: '',
+      remarks: '', finalAccDate: '', sourcePage: pageNum
+    };
+    let nonEmpty = 0;
+    for (let c = 0; c < nCols; c++) {
+      const field = colMap[c];
+      if (!field) continue;
+      const val = cleanStr(grid[r][c]);
+      rec[field] = val;
+      if (val) nonEmpty++;
+    }
+    if (nonEmpty === 0) continue;
+    recs.push(rec);
+  }
+
   return recs;
 }
 
@@ -788,43 +977,27 @@ async function parseAllFiles(files, onProgress, onFileDone, onFileError) {
   for (let fi = 0; fi < files.length; fi++) {
     const f = files[fi];
     try {
-      const buf = await f.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      const buf   = await f.arrayBuffer();
+      const pdf   = await pdfjsLib.getDocument({ data: buf }).promise;
       const total = pdf.numPages;
       const fileRecs = [];
 
       for (let p = 1; p <= total; p++) {
         try {
-          const page    = await pdf.getPage(p);
-          const content = await page.getTextContent();
-          const items   = content.items.map(i => ({
-            text: cleanStr(i.str),
-            x: Math.round(i.transform[4]),
-            y: Math.round(i.transform[5])
-          })).filter(i => i.text);
-
-          // Group into lines by y-coordinate (3px tolerance)
-          const lineMap = new Map();
-          for (const item of items) {
-            let key = null;
-            for (const [k] of lineMap) {
-              if (Math.abs(k - item.y) <= 3) { key = k; break; }
-            }
-            if (key === null) { key = item.y; lineMap.set(key, []); }
-            lineMap.get(key).push(item);
-          }
-          const lines = [...lineMap.entries()]
-            .sort((a, b) => b[0] - a[0])
-            .map(([y, its]) => ({ y, items: its.sort((a, b) => a.x - b.x) }));
-
-          fileRecs.push(...extractMCLFromLines(lines, p));
+          const page = await pdf.getPage(p);
+          const pageRecs = await extractMCLFromPage(page, p);
+          fileRecs.push(...pageRecs);
+          page.cleanup();
         } catch (e) {
           // non-fatal page error, continue
         }
 
-        onProgress(`Parsing ${f.name} — page ${p} / ${total}`, ((fi / files.length) + (p / total / files.length)) * 100);
+        onProgress(
+          `Parsing ${f.name} — page ${p} / ${total}`,
+          ((fi / files.length) + (p / total / files.length)) * 100
+        );
 
-        // Yield to browser every 10 pages to stay responsive
+        // Yield every 10 pages so the browser stays responsive
         if (p % 10 === 0) await new Promise(r => setTimeout(r, 0));
       }
 
