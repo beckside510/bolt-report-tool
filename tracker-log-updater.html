@@ -512,198 +512,6 @@ table.records tr.row-skip td { color: var(--text-dim); }
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
-// ── Constants ──────────────────────────────────────────────────────────────
-const PROXY      = 'https://smartsheet-proxy.rebecca-91f.workers.dev/2.0';
-const SHEET_ID   = '3688140496654212';
-
-// Smartsheet column IDs (from get_columns)
-const COL = {
-  memberID:        2493442411499396,
-  memberDesc:      6997042038869892,
-  weldTypes:       1367542504656772,
-  inspectionTypes: 5871142132027268,
-  memberSize:      3619342318342020,
-  heatNo:          8122941945712516,
-  totalQty:        2601929284030340,
-  currentQty:      8512903794954116,
-  remarks:         350129470345092,
-  finalAccDate:    4853729097715588,
-  refCol1:         8704460913414020,
-  refCol2:         541686588804996
-};
-
-// ── State ──────────────────────────────────────────────────────────────────
-let queuedFiles  = [];
-let logLines     = 0;
-let isBusy       = false;
-let tokenOk      = false;
-let trackerRows  = []; // [{rowId, refCol1, refCol2, currentQty}, ...]
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-function esc(str) {
-  return String(str)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-
-function log(msg, type = 'info') {
-  const body = document.getElementById('logBody');
-  const now  = new Date();
-  const ts   = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-  const line = document.createElement('div');
-  line.className = 'log-line';
-  line.innerHTML = `<span class="log-time">[${ts}]</span><span class="log-${type}">${esc(msg)}</span>`;
-  body.appendChild(line);
-  body.scrollTop = body.scrollHeight;
-  logLines++;
-  document.getElementById('logCount').textContent = `${logLines} lines`;
-  document.getElementById('logPanel').classList.add('visible');
-}
-
-function normalizeDate(raw) {
-  // Accept: YYYY-MM-DD, Month DD YYYY, MM-DD-YYYY, DD/MM/YYYY variants
-  if (!raw) return '';
-  const s = raw.trim();
-  // Already mm/dd/yyyy
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;
-  // YYYY-MM-DD
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
-  // Month name: "May 12, 2026" or "12 May 2026"
-  const months = {january:'01',february:'02',march:'03',april:'04',may:'05',june:'06',
-                  july:'07',august:'08',september:'09',october:'10',november:'11',december:'12'};
-  const mdy = s.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
-  if (mdy) {
-    const m = months[mdy[1].toLowerCase()];
-    if (m) return `${m}/${String(mdy[2]).padStart(2,'0')}/${mdy[3]}`;
-  }
-  const dmy = s.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
-  if (dmy) {
-    const m = months[dmy[2].toLowerCase()];
-    if (m) return `${m}/${String(dmy[1]).padStart(2,'0')}/${dmy[3]}`;
-  }
-  // MM-DD-YYYY
-  const mdy2 = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-  if (mdy2) return `${mdy2[1].padStart(2,'0')}/${mdy2[2].padStart(2,'0')}/${mdy2[3]}`;
-  return s; // return as-is if unrecognized
-}
-
-function isAccepted(val) {
-  if (!val) return false;
-  return /^accept/i.test(val.trim());
-}
-
-// Find best (longest) case-insensitive substring match of any refCol1 inside remarks
-function findRefMatch(remarks, trackerRows) {
-  const r = remarks.toLowerCase();
-  let best = null;
-  let bestLen = 0;
-  for (const row of trackerRows) {
-    const ref = (row.refCol1 || '').toLowerCase();
-    if (!ref) continue;
-    if (r.includes(ref) && ref.length > bestLen) {
-      best = row;
-      bestLen = ref.length;
-    }
-  }
-  return best;
-}
-
-function setProgress(label, pct) {
-  document.getElementById('progressLabel').textContent = label;
-  document.getElementById('progressPct').textContent   = `${Math.round(pct)}%`;
-  document.getElementById('progressFill').style.width  = `${pct}%`;
-}
-
-function updateRunBtn() {
-  document.getElementById('runBtn').disabled = isBusy || !tokenOk || queuedFiles.length === 0;
-}
-
-// ── Token verification ─────────────────────────────────────────────────────
-let tokenTimer = null;
-document.getElementById('tokenInput').addEventListener('input', () => {
-  clearTimeout(tokenTimer);
-  tokenOk = false;
-  updateRunBtn();
-  setTokenStatus('idle', 'Not verified');
-  const val = document.getElementById('tokenInput').value.trim();
-  if (!val) return;
-  setTokenStatus('busy', 'Verifying…');
-  tokenTimer = setTimeout(() => verifyToken(val), 600);
-});
-
-function setTokenStatus(cls, text) {
-  const el = document.getElementById('tokenStatus');
-  el.className = `token-status ${cls}`;
-  el.textContent = text;
-}
-
-async function verifyToken(token) {
-  try {
-    const res = await fetch(`${PROXY}/sheets/${SHEET_ID}?pageSize=1`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (res.ok) {
-      tokenOk = true;
-      setTokenStatus('ok', '✓ Connected');
-      log('Smartsheet connection verified.', 'success');
-    } else {
-      tokenOk = false;
-      setTokenStatus('err', `Error ${res.status}`);
-    }
-  } catch (e) {
-    tokenOk = false;
-    setTokenStatus('err', 'Connection failed');
-  }
-  updateRunBtn();
-}
-
-// ── File intake ────────────────────────────────────────────────────────────
-const dropZone  = document.getElementById('dropZone');
-const fileInput = document.getElementById('fileInput');
-
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('drag-over');
-  addFiles([...e.dataTransfer.files].filter(f => f.name.toLowerCase().endsWith('.pdf')));
-});
-fileInput.addEventListener('change', () => {
-  addFiles([...fileInput.files]);
-  fileInput.value = '';
-});
-
-function addFiles(files) {
-  if (!files.length) return;
-  queuedFiles.push(...files);
-  renderFileList();
-  updateRunBtn();
-}
-
-function renderFileList() {
-  const wrap = document.getElementById('fileListWrap');
-  const list = document.getElementById('fileList');
-  if (!queuedFiles.length) { wrap.classList.remove('visible'); return; }
-  wrap.classList.add('visible');
-  document.getElementById('fileCount').textContent = `${queuedFiles.length} file${queuedFiles.length !== 1 ? 's' : ''}`;
-  list.innerHTML = queuedFiles.map((f, i) =>
-    `<div class="file-item pending" id="fi-${i}">
-      <span class="fi-icon">&#x1F4C4;</span>
-      <span class="fi-name">${esc(f.name)}</span>
-      <span class="fi-status">Pending</span>
-    </div>`
-  ).join('');
-  dropZone.classList.add('has-file');
-}
-
-function setFileStatus(idx, cls, label) {
-  const el = document.getElementById(`fi-${idx}`);
-  if (!el) return;
-  el.className = `file-item ${cls}`;
-  el.querySelector('.fi-status').textContent = label;
-}
-
 // ── PDF.js setup ───────────────────────────────────────────────────────────
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -1010,45 +818,260 @@ async function parseAllFiles(files, onProgress, onFileDone, onFileError) {
   }
   return allRecs;
 }
+</script>
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────
+const PROXY      = 'https://smartsheet-proxy.rebecca-91f.workers.dev/2.0';
+const DEST_SHEET = '3688140496654212';   // Frame Tracker (destination)
+const REF_SHEET  = '1899496114966404';   // Truss Types   (reference)
 
-// ── Load tracker sheet from Smartsheet ────────────────────────────────────
-async function loadTrackerRows(token) {
-  const rows = [];
-  // Single request with high pageSize handles up to 10,000 rows.
-  // Smartsheet's max pageSize is 10000.
-  const res = await fetch(`${PROXY}/sheets/${SHEET_ID}?pageSize=10000`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  if (!res.ok) throw new Error(`Smartsheet fetch failed: ${res.status}`);
-  const data = await res.json();
-  const sheetRows = data.rows || [];
-  for (const r of sheetRows) {
-    const getCell = colId => (r.cells || []).find(c => c.columnId === colId);
-    rows.push({
-      rowId:      r.id,
-      refCol1:    String(getCell(COL.refCol1)?.value || '').trim(),
-      refCol2:    getCell(COL.refCol2)?.value,
-      currentQty: getCell(COL.currentQty)?.value
-    });
-  }
-  return rows;
+// Destination sheet column IDs
+const COL = {
+  trusType:        8989918197223300,
+  memberID:        2493442411499396,
+  memberDesc:      6997042038869892,
+  weldTypes:       1367542504656772,
+  inspectionTypes: 5871142132027268,
+  memberSize:      3619342318342020,
+  heatNo:          8122941945712516,
+  totalQty:        2601929284030340,
+  currentQty:      8512903794954116,
+  remarks:         350129470345092,
+  finalAccDate:    4853729097715588
+};
+
+// ── State ──────────────────────────────────────────────────────────────────
+let queuedFiles = [];
+let logLines    = 0;
+let isBusy      = false;
+let tokenOk     = false;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-// ── Push one row update to Smartsheet ─────────────────────────────────────
-async function pushRowUpdate(token, rowId, cells) {
-  const res = await fetch(`${PROXY}/sheets/${SHEET_ID}/rows`, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify([{ id: rowId, cells }])
+function log(msg, type = 'info') {
+  const body = document.getElementById('logBody');
+  const now  = new Date();
+  const ts   = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `<span class="log-time">[${ts}]</span><span class="log-${type}">${esc(msg)}</span>`;
+  body.appendChild(line);
+  body.scrollTop = body.scrollHeight;
+  logLines++;
+  document.getElementById('logCount').textContent = `${logLines} lines`;
+  document.getElementById('logPanel').classList.add('visible');
+}
+
+function normalizeDate(raw) {
+  if (!raw) return '';
+  const s = raw.trim();
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  const months = {january:'01',february:'02',march:'03',april:'04',may:'05',june:'06',
+                  july:'07',august:'08',september:'09',october:'10',november:'11',december:'12'};
+  const mdy = s.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (mdy) { const m = months[mdy[1].toLowerCase()]; if (m) return `${m}/${String(mdy[2]).padStart(2,'0')}/${mdy[3]}`; }
+  const dmy = s.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+  if (dmy) { const m = months[dmy[2].toLowerCase()]; if (m) return `${m}/${String(dmy[1]).padStart(2,'0')}/${dmy[3]}`; }
+  const mdy2 = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (mdy2) return `${mdy2[1].padStart(2,'0')}/${mdy2[2].padStart(2,'0')}/${mdy2[3]}`;
+  return s;
+}
+
+function isAccepted(val) {
+  return val ? /^accept/i.test(val.trim()) : false;
+}
+
+// Case-insensitive substring: find longest refList entry that appears in remarks.
+function findTrussMatch(remarks, refList) {
+  const r = remarks.toLowerCase();
+  let best = null, bestLen = 0;
+  for (const entry of refList) {
+    const id = (entry.trusTypeId || '').toLowerCase();
+    if (!id) continue;
+    if (r.includes(id) && id.length > bestLen) { best = entry; bestLen = id.length; }
+  }
+  return best;
+}
+
+// Alphanumeric sort comparator (locale-aware, numeric chunks treated as numbers)
+function alphaNumCmp(a, b) {
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function setProgress(label, pct) {
+  document.getElementById('progressLabel').textContent = label;
+  document.getElementById('progressPct').textContent   = `${Math.round(pct)}%`;
+  document.getElementById('progressFill').style.width  = `${pct}%`;
+}
+
+function updateRunBtn() {
+  document.getElementById('runBtn').disabled = isBusy || !tokenOk || queuedFiles.length === 0;
+}
+
+// ── Token verification ─────────────────────────────────────────────────────
+let tokenTimer = null;
+document.getElementById('tokenInput').addEventListener('input', () => {
+  clearTimeout(tokenTimer);
+  tokenOk = false;
+  updateRunBtn();
+  setTokenStatus('idle', 'Not verified');
+  const val = document.getElementById('tokenInput').value.trim();
+  if (!val) return;
+  setTokenStatus('busy', 'Verifying…');
+  tokenTimer = setTimeout(() => verifyToken(val), 600);
+});
+
+function setTokenStatus(cls, text) {
+  const el = document.getElementById('tokenStatus');
+  el.className = `token-status ${cls}`;
+  el.textContent = text;
+}
+
+async function verifyToken(token) {
+  try {
+    const res = await fetch(`${PROXY}/sheets/${DEST_SHEET}?pageSize=1`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      tokenOk = true;
+      setTokenStatus('ok', '✓ Connected');
+      log('Smartsheet connection verified.', 'success');
+    } else {
+      tokenOk = false;
+      setTokenStatus('err', `Error ${res.status}`);
+    }
+  } catch (e) {
+    tokenOk = false;
+    setTokenStatus('err', 'Connection failed');
+  }
+  updateRunBtn();
+}
+
+// ── File intake ────────────────────────────────────────────────────────────
+const dropZone  = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  addFiles([...e.dataTransfer.files].filter(f => f.name.toLowerCase().endsWith('.pdf')));
+});
+fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
+
+function addFiles(files) {
+  if (!files.length) return;
+  queuedFiles.push(...files);
+  renderFileList();
+  updateRunBtn();
+}
+
+function renderFileList() {
+  const wrap = document.getElementById('fileListWrap');
+  const list = document.getElementById('fileList');
+  if (!queuedFiles.length) { wrap.classList.remove('visible'); return; }
+  wrap.classList.add('visible');
+  document.getElementById('fileCount').textContent = `${queuedFiles.length} file${queuedFiles.length !== 1 ? 's' : ''}`;
+  list.innerHTML = queuedFiles.map((f, i) =>
+    `<div class="file-item pending" id="fi-${i}">
+      <span class="fi-icon">&#x1F4C4;</span>
+      <span class="fi-name">${esc(f.name)}</span>
+      <span class="fi-status">Pending</span>
+    </div>`
+  ).join('');
+  dropZone.classList.add('has-file');
+}
+
+function setFileStatus(idx, cls, label) {
+  const el = document.getElementById(`fi-${idx}`);
+  if (!el) return;
+  el.className = `file-item ${cls}`;
+  el.querySelector('.fi-status').textContent = label;
+}
+
+// ── Smartsheet API helpers ─────────────────────────────────────────────────
+
+// Load reference sheet → array of { trusTypeId, totalQty }
+async function loadRefSheet(token) {
+  const res = await fetch(`${PROXY}/sheets/${REF_SHEET}?pageSize=10000`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error(`Reference sheet fetch failed: ${res.status}`);
+  const data = await res.json();
+  // Columns: index 0 = Floor, index 1 = Truss Type (ID), index 2 = Quantity
+  const cols  = data.columns || [];
+  const idCol  = cols[1]?.id;
+  const qtyCol = cols[2]?.id;
+  return (data.rows || []).map(r => {
+    const getCell = id => (r.cells || []).find(c => c.columnId === id);
+    return {
+      trusTypeId: String(getCell(idCol)?.value  || '').trim(),
+      totalQty:   getCell(qtyCol)?.value ?? ''
+    };
+  }).filter(e => e.trusTypeId);
+}
+
+// Load destination sheet → array of { rowId, trusType, memberId, rowIndex }
+// Used for duplicate detection and siblingId positioning.
+async function loadDestRows(token) {
+  const res = await fetch(`${PROXY}/sheets/${DEST_SHEET}?pageSize=10000`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error(`Destination sheet fetch failed: ${res.status}`);
+  const data = await res.json();
+  return (data.rows || []).map((r, idx) => {
+    const getCell = id => (r.cells || []).find(c => c.columnId === id);
+    return {
+      rowId:    r.id,
+      trusType: String(getCell(COL.trusType)?.value || '').trim(),
+      memberId: String(getCell(COL.memberID)?.value || '').trim(),
+      rowIndex: idx
+    };
+  });
+}
+
+// Add a single new row. Position determined by siblingId (insert below) or toBottom.
+async function addRow(token, cells, siblingId) {
+  const rowDef = { cells };
+  if (siblingId) { rowDef.siblingId = siblingId; rowDef.above = false; }
+  else           { rowDef.toBottom  = true; }
+
+  const res = await fetch(`${PROXY}/sheets/${DEST_SHEET}/rows`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify([rowDef])
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
-    throw new Error(`PUT row ${rowId} failed ${res.status}: ${txt.slice(0,120)}`);
+    throw new Error(`POST row failed ${res.status}: ${txt.slice(0, 120)}`);
   }
-  return res.json();
+  const data = await res.json();
+  // Return the new row's ID so we can use it as a sibling for subsequent rows
+  return (data.result || data.rows || [])[0]?.id || null;
+}
+
+// Find the correct siblingId for a new row with the given trusType.
+// destRows is kept updated with newly added rows during the run.
+function findSiblingId(trusType, destRows) {
+  // Find all rows with this same Truss Type → insert below the last one
+  const sameType = destRows.filter(r => r.trusType.toLowerCase() === trusType.toLowerCase());
+  if (sameType.length) return sameType[sameType.length - 1].rowId;
+
+  // No rows with this Truss Type yet → find the last row whose Truss Type sorts before ours
+  const before = destRows.filter(r => r.trusType && alphaNumCmp(r.trusType, trusType) < 0);
+  if (before.length) return before[before.length - 1].rowId;
+
+  // Nothing before it alphabetically → will go to top (return null → toBottom fallback
+  // only if sheet is empty; otherwise we want toTop)
+  return destRows.length ? 'TOP' : null;
 }
 
 // ── Main run ───────────────────────────────────────────────────────────────
@@ -1059,7 +1082,6 @@ async function run() {
   isBusy = true;
   updateRunBtn();
 
-  // Reset UI
   document.getElementById('summaryBar').classList.remove('visible');
   document.getElementById('logBody').innerHTML = '';
   document.getElementById('logPanel').classList.remove('visible');
@@ -1071,24 +1093,27 @@ async function run() {
 
   const btn   = document.getElementById('runBtn');
   const token = document.getElementById('tokenInput').value.trim();
-
-  btn.innerHTML = '<span class="spinner"></span> Parsing PDFs…';
+  btn.innerHTML = '<span class="spinner"></span> Loading…';
   btn.disabled  = true;
 
-  let cntUpdated = 0, cntSkipped = 0, cntErrors = 0, cntPages = 0;
+  let cntAdded = 0, cntSkipped = 0, cntErrors = 0;
 
   try {
-    // 1. Load tracker rows
-    log('Loading tracker rows from Smartsheet…', 'info');
-    trackerRows = await loadTrackerRows(token);
-    log(`Loaded ${trackerRows.length} tracker rows.`, 'success');
+    // 1. Load reference sheet (Truss Types + Total Qty)
+    log('Loading Truss Types reference sheet…', 'info');
+    const refList = await loadRefSheet(token);
+    log(`Loaded ${refList.length} truss type(s) from reference sheet.`, 'success');
 
-    // 2. Parse PDFs via Web Worker
+    // 2. Load current destination rows (for duplicate check + positioning)
+    log('Loading existing destination rows…', 'info');
+    let destRows = await loadDestRows(token);
+    log(`Loaded ${destRows.length} existing row(s) in destination sheet.`, 'success');
+
+    // 3. Parse PDFs
+    btn.innerHTML = '<span class="spinner"></span> Parsing PDFs…';
     log(`Starting parse of ${queuedFiles.length} PDF(s)…`, 'info');
 
-    let allRecords = [];
-
-    allRecords = await parseAllFiles(
+    let allRecords = await parseAllFiles(
       queuedFiles,
       (label, pct) => setProgress(label, Math.min(pct, 99)),
       (idx, recs) => {
@@ -1105,60 +1130,68 @@ async function run() {
     setProgress('Parse complete.', 100);
     log(`Total extracted: ${allRecords.length} member row(s) across all PDFs.`, 'info');
 
-    // 3. Filter & match
+    // 4. Filter, sort, and write
     btn.innerHTML = '<span class="spinner"></span> Pushing to Smartsheet…';
 
-    const tbodyEl = document.getElementById('recordsTbody');
-    let rowsHtml  = '';
+    // Keep only accepted records with qty present and non-empty remarks
+    const eligible = [];
+    const tbodyEl  = document.getElementById('recordsTbody');
+    let rowsHtml   = '';
 
     for (const rec of allRecords) {
-      // Filter: must be accepted
       if (!isAccepted(rec.accRej)) {
         const reason = `Not accepted (Acc/Rej="${rec.accRej || 'blank'}")`;
         rowsHtml += buildTableRow(rec, null, 'skip', reason);
         log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
-        cntSkipped++;
-        continue;
+        cntSkipped++; continue;
       }
-
-      // Filter: qty must be present
-      const qtyRaw = rec.qty;
-      const qtyNum = parseFloat(qtyRaw);
-      if (!qtyRaw || isNaN(qtyNum)) {
-        const reason = `Qty blank or missing`;
+      if (!rec.qty || rec.qty.trim() === '') {
+        const reason = 'Qty blank or missing';
         rowsHtml += buildTableRow(rec, null, 'skip', reason);
         log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
-        cntSkipped++;
-        continue;
+        cntSkipped++; continue;
       }
-
-      // Match ref col 1 via remarks
       if (!rec.remarks) {
-        const reason = 'Remarks empty — cannot match';
+        const reason = 'Remarks empty — cannot match Truss Type';
         rowsHtml += buildTableRow(rec, null, 'skip', reason);
         log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
-        cntSkipped++;
-        continue;
+        cntSkipped++; continue;
       }
-
-      const matched = findRefMatch(rec.remarks, trackerRows);
+      const matched = findTrussMatch(rec.remarks, refList);
       if (!matched) {
-        const reason = `No Ref Col 1 match found in Remarks: "${rec.remarks.slice(0,60)}"`;
+        const reason = `No Truss Type match in Remarks: "${rec.remarks.slice(0,60)}"`;
         rowsHtml += buildTableRow(rec, null, 'skip', reason);
         log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
-        cntSkipped++;
-        continue;
+        cntSkipped++; continue;
+      }
+      eligible.push({ rec, matched });
+    }
+
+    // Sort eligible records by Truss Type alphanumeric before writing
+    eligible.sort((a, b) => alphaNumCmp(a.matched.trusTypeId, b.matched.trusTypeId));
+
+    for (const { rec, matched } of eligible) {
+      const trusTypeId = matched.trusTypeId;
+      const memberId   = rec.memberId;
+
+      // Duplicate check: same Truss Type + same Member ID already on sheet?
+      const isDup = destRows.some(
+        r => r.trusType.toLowerCase() === trusTypeId.toLowerCase() &&
+             r.memberId.toLowerCase() === memberId.toLowerCase()
+      );
+      if (isDup) {
+        const reason = `Duplicate — ${trusTypeId} / ${memberId} already on sheet`;
+        rowsHtml += buildTableRow(rec, trusTypeId, 'skip', reason);
+        log(`SKIP — ${reason}`, 'warn');
+        cntSkipped++; continue;
       }
 
-      // Calculate new qty
-      const addAmt    = qtyNum * 0.5;
-      const existQty  = parseFloat(matched.currentQty) || 0;
-      const newQty    = existQty + addAmt;
-      const totalQty  = matched.refCol2 != null ? String(matched.refCol2) : '';
+      // Determine insertion position
+      const siblingId = findSiblingId(trusTypeId, destRows);
 
-      // Build cells array
       const cells = [
-        { columnId: COL.memberID,        value: rec.memberId },
+        { columnId: COL.trusType,        value: trusTypeId },
+        { columnId: COL.memberID,        value: memberId },
         { columnId: COL.memberDesc,      value: rec.memberDesc },
         { columnId: COL.weldTypes,       value: rec.weldTypes },
         { columnId: COL.inspectionTypes, value: rec.inspectionTypes },
@@ -1166,40 +1199,63 @@ async function run() {
         { columnId: COL.heatNo,          value: rec.heatNo },
         { columnId: COL.remarks,         value: rec.remarks },
         { columnId: COL.finalAccDate,    value: normalizeDate(rec.finalAccDate) },
-        { columnId: COL.currentQty,      value: newQty },
-        { columnId: COL.totalQty,        value: totalQty }
+        { columnId: COL.currentQty,      value: rec.qty },
+        { columnId: COL.totalQty,        value: String(matched.totalQty) }
       ];
 
       try {
-        await pushRowUpdate(token, matched.rowId, cells);
-        // Update our local cache so subsequent records in the same run see the new qty
-        matched.currentQty = newQty;
-        rowsHtml += buildTableRow(rec, matched.refCol1, 'ok', `+${addAmt} → ${newQty}`);
-        log(`OK — ${rec.memberId} matched ${matched.refCol1} → Current Qty ${existQty} + ${addAmt} = ${newQty}`, 'success');
-        cntUpdated++;
+        let useSibling = siblingId === 'TOP' ? null : siblingId;
+        let rowDef = { cells };
+        if (siblingId === 'TOP')  rowDef.toTop    = true;
+        else if (useSibling)      { rowDef.siblingId = useSibling; rowDef.above = false; }
+        else                      rowDef.toBottom  = true;
+
+        const res = await fetch(`${PROXY}/sheets/${DEST_SHEET}/rows`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify([rowDef])
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`POST row failed ${res.status}: ${txt.slice(0, 120)}`);
+        }
+        const data   = await res.json();
+        const newId  = (data.result || data.rows || [])[0]?.id || null;
+
+        // Add to local destRows so subsequent records position correctly
+        if (newId) {
+          // Insert at the right position in our local list
+          const insertAfterIdx = siblingId === 'TOP'
+            ? -1
+            : destRows.findIndex(r => r.rowId === useSibling);
+          destRows.splice(insertAfterIdx + 1, 0, {
+            rowId: newId, trusType: trusTypeId, memberId, rowIndex: insertAfterIdx + 1
+          });
+        }
+
+        rowsHtml += buildTableRow(rec, trusTypeId, 'ok', `Added`);
+        log(`OK — ${memberId} / ${trusTypeId} added to sheet.`, 'success');
+        cntAdded++;
       } catch (err) {
-        rowsHtml += buildTableRow(rec, matched.refCol1, 'err', err.message.slice(0, 80));
-        log(`ERROR — ${rec.memberId} / ${matched.refCol1}: ${err.message}`, 'error');
+        rowsHtml += buildTableRow(rec, trusTypeId, 'err', err.message.slice(0, 80));
+        log(`ERROR — ${memberId} / ${trusTypeId}: ${err.message}`, 'error');
         cntErrors++;
       }
 
-      // Brief pause between writes to respect rate limits
-      await new Promise(r => setTimeout(r, 120));
+      await new Promise(r => setTimeout(r, 120)); // rate-limit pause
     }
 
-    // 4. Render records table
     tbodyEl.innerHTML = rowsHtml;
     document.getElementById('recordsCount').textContent = `${allRecords.length} row(s)`;
     document.getElementById('recordsPanel').classList.add('visible');
 
-    // 5. Summary
-    document.getElementById('statUpdated').textContent = cntUpdated;
+    document.getElementById('statUpdated').textContent = cntAdded;
     document.getElementById('statSkipped').textContent = cntSkipped;
     document.getElementById('statErrors').textContent  = cntErrors;
     document.getElementById('statParsed').textContent  = document.querySelectorAll('.file-item.ok').length + ' PDFs';
     document.getElementById('summaryBar').classList.add('visible');
 
-    log(`Done. ${cntUpdated} updated, ${cntSkipped} skipped, ${cntErrors} errors.`,
+    log(`Done. ${cntAdded} added, ${cntSkipped} skipped, ${cntErrors} errors.`,
         cntErrors ? 'error' : cntSkipped ? 'warn' : 'success');
 
   } catch (err) {
@@ -1212,17 +1268,17 @@ async function run() {
   document.getElementById('progressWrap').classList.remove('visible');
 }
 
-function buildTableRow(rec, refMatch, status, note) {
+function buildTableRow(rec, trusType, status, note) {
   const statusBadge = status === 'ok'
-    ? `<span class="badge badge-ok">Updated</span>`
+    ? `<span class="badge badge-ok">Added</span>`
     : status === 'err'
     ? `<span class="badge badge-err">Error</span>`
     : `<span class="badge badge-skip">Skipped</span>`;
   const cls = status === 'ok' ? 'row-ok' : 'row-skip';
   return `<tr class="${cls}">
     <td>${esc(rec.memberId)}</td>
-    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(rec.remarks)}</td>
-    <td>${refMatch ? esc(refMatch) : '<span style="color:var(--text-dim)">—</span>'}</td>
+    <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(rec.remarks)}">${esc(rec.remarks)}</td>
+    <td>${trusType ? esc(trusType) : '<span style="color:var(--text-dim)">—</span>'}</td>
     <td>${esc(rec.weldTypes)}</td>
     <td>${esc(rec.inspectionTypes)}</td>
     <td>${esc(rec.qty)}</td>
