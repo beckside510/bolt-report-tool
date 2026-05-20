@@ -1201,8 +1201,8 @@ async function run() {
         { columnId: COL.heatNo,          value: rec.heatNo },
         { columnId: COL.remarks,         value: rec.remarks },
         { columnId: COL.finalAccDate,    value: normalizeDate(rec.finalAccDate) },
-        { columnId: COL.memberQty,        value: rec.qty },
-        { columnId: COL.totalQtyRequired, value: String(matched.totalQty) }
+        { columnId: COL.memberQty,        value: parseFloat(rec.qty) || 0 },
+        { columnId: COL.totalQtyRequired, value: parseFloat(matched.totalQty) || 0 }
       ];
 
       try {
