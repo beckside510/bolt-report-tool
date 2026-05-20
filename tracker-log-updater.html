@@ -827,17 +827,19 @@ const REF_SHEET  = '1899496114966404';   // Truss Types   (reference)
 
 // Destination sheet column IDs
 const COL = {
-  trusType:        8989918197223300,
-  memberID:        2493442411499396,
-  memberDesc:      6997042038869892,
-  weldTypes:       1367542504656772,
-  inspectionTypes: 5871142132027268,
-  memberSize:      3619342318342020,
-  heatNo:          8122941945712516,
-  totalQty:        2601929284030340,
-  currentQty:      8512903794954116,
-  remarks:         350129470345092,
-  finalAccDate:    4853729097715588
+  trusType:         8989918197223300,
+  memberID:         2493442411499396,
+  memberDesc:       6997042038869892,
+  weldTypes:        1367542504656772,
+  inspectionTypes:  5871142132027268,
+  memberSize:       3619342318342020,
+  heatNo:           8122941945712516,
+  memberQty:        8512903794954116,   // formerly Member Qty
+  totalQtyRequired: 2601929284030340,   // formerly Total Qty Required
+  remarks:          350129470345092,
+  finalAccDate:     4853729097715588
+  // Assembled Qty (2760757610844036) and Quantity Status (7062725770645380)
+  // are formula columns — written by Smartsheet, not by this tool
 };
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -1199,8 +1201,8 @@ async function run() {
         { columnId: COL.heatNo,          value: rec.heatNo },
         { columnId: COL.remarks,         value: rec.remarks },
         { columnId: COL.finalAccDate,    value: normalizeDate(rec.finalAccDate) },
-        { columnId: COL.currentQty,      value: rec.qty },
-        { columnId: COL.totalQty,        value: String(matched.totalQty) }
+        { columnId: COL.memberQty,        value: rec.qty },
+        { columnId: COL.totalQtyRequired, value: String(matched.totalQty) }
       ];
 
       try {
