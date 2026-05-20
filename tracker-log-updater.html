@@ -495,6 +495,7 @@ table.records tr.row-skip td { color: var(--text-dim); }
     <table class="records" id="recordsTable">
       <thead>
         <tr>
+          <th>Source File</th>
           <th>Member ID</th>
           <th>Remarks (PDF)</th>
           <th>Ref Match</th>
@@ -809,6 +810,8 @@ async function parseAllFiles(files, onProgress, onFileDone, onFileError) {
         if (p % 10 === 0) await new Promise(r => setTimeout(r, 0));
       }
 
+      // Stamp source filename on every record
+      fileRecs.forEach(r => r.sourceFile = f.name);
       pdf.destroy();
       onFileDone(fi, fileRecs);
       allRecs.push(...fileRecs);
@@ -1144,26 +1147,26 @@ async function run() {
       if (!isAccepted(rec.accRej)) {
         const reason = `Not accepted (Acc/Rej="${rec.accRej || 'blank'}")`;
         rowsHtml += buildTableRow(rec, null, 'skip', reason);
-        log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
+        log(`SKIP — [${rec.sourceFile || '?'}] ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
         cntSkipped++; continue;
       }
       if (!rec.qty || rec.qty.trim() === '') {
         const reason = 'Qty blank or missing';
         rowsHtml += buildTableRow(rec, null, 'skip', reason);
-        log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
+        log(`SKIP — [${rec.sourceFile || '?'}] ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
         cntSkipped++; continue;
       }
       if (!rec.remarks) {
         const reason = 'Remarks empty — cannot match Truss Type';
         rowsHtml += buildTableRow(rec, null, 'skip', reason);
-        log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
+        log(`SKIP — [${rec.sourceFile || '?'}] ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
         cntSkipped++; continue;
       }
       const matched = findTrussMatch(rec.remarks, refList);
       if (!matched) {
         const reason = `No Truss Type match in Remarks: "${rec.remarks.slice(0,60)}"`;
         rowsHtml += buildTableRow(rec, null, 'skip', reason);
-        log(`SKIP — ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
+        log(`SKIP — [${rec.sourceFile || '?'}] ${rec.memberId || '(no ID)'}: ${reason}`, 'warn');
         cntSkipped++; continue;
       }
       eligible.push({ rec, matched });
@@ -1184,7 +1187,7 @@ async function run() {
       if (isDup) {
         const reason = `Duplicate — ${trusTypeId} / ${memberId} already on sheet`;
         rowsHtml += buildTableRow(rec, trusTypeId, 'skip', reason);
-        log(`SKIP — ${reason}`, 'warn');
+        log(`SKIP — [${rec.sourceFile || '?'}] ${reason}`, 'warn');
         cntSkipped++; continue;
       }
 
@@ -1236,11 +1239,11 @@ async function run() {
         }
 
         rowsHtml += buildTableRow(rec, trusTypeId, 'ok', `Added`);
-        log(`OK — ${memberId} / ${trusTypeId} added to sheet.`, 'success');
+        log(`OK — [${rec.sourceFile || '?'}] ${memberId} / ${trusTypeId} added to sheet.`, 'success');
         cntAdded++;
       } catch (err) {
         rowsHtml += buildTableRow(rec, trusTypeId, 'err', err.message.slice(0, 80));
-        log(`ERROR — ${memberId} / ${trusTypeId}: ${err.message}`, 'error');
+        log(`ERROR — [${rec.sourceFile || '?'}] ${memberId} / ${trusTypeId}: ${err.message}`, 'error');
         cntErrors++;
       }
 
@@ -1278,6 +1281,7 @@ function buildTableRow(rec, trusType, status, note) {
     : `<span class="badge badge-skip">Skipped</span>`;
   const cls = status === 'ok' ? 'row-ok' : 'row-skip';
   return `<tr class="${cls}">
+    <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);font-size:11px" title="${esc(rec.sourceFile || '')}">${esc(rec.sourceFile || '—')}</td>
     <td>${esc(rec.memberId)}</td>
     <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(rec.remarks)}">${esc(rec.remarks)}</td>
     <td>${trusType ? esc(trusType) : '<span style="color:var(--text-dim)">—</span>'}</td>
