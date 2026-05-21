@@ -483,8 +483,11 @@ function clearFiles() {
   allRecords = [];
   stats = { files: 0, records: 0, warnings: 0, errors: 0 };
   dispositions = {};
+  lastApproved = [];
+  lastSuspects = [];
   renderFileList();
   updateParseBtn();
+  updatePushBtn();
   dropZone.classList.remove('has-file');
   document.getElementById('dropTitle').textContent = 'Drop a folder or files here, or click to browse';
   document.getElementById('dropSub').textContent = 'Selects a whole folder by default — or use the button below for individual files';
@@ -1085,6 +1088,10 @@ async function pushApproved() {
     connection.principleColMap = buildColMap(refresh2.columns || []);
     connection.existingKeyMap = buildNarrowKeyMap(refresh2.rows || [], connection.principleColMap);
     pushLog('Done.', 'success');
+    if (pushedCount > 0 && failedCount === 0) {
+      pushLog('', 'info');
+      pushLog('Ready for next batch — click Clear above to start fresh.', 'info');
+    }
   } catch (e) {
     pushLog('Push aborted: ' + e.message, 'error');
   } finally {
