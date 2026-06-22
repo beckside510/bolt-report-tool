@@ -829,15 +829,15 @@ const REF_SHEET  = '1899496114966404';   // Truss Types   (reference)
 
 // Destination sheet column IDs
 const COL = {
-  trusType:        8989918197223300,
-  memberID:        2493442411499396,
-  inspectionTypes: 5871142132027268,
-  memberSize:      3619342318342020,
-  memberQty:       8512903794954116,
-  remarks:         350129470345092,
-  finalAccDate:    4853729097715588
+  trusType:         8989918197223300,
+  memberID:         2493442411499396,
+  inspectionTypes:  5871142132027268,
+  memberSize:       3619342318342020,
+  memberQty:        8512903794954116,
+  totalQtyRequired: 2601929284030340,
+  remarks:          350129470345092,
+  finalAccDate:     4853729097715588
   // Assembled Qty (2760757610844036) — Smartsheet formula, not written by this tool
-  // Total Qty Required (2601929284030340) — already in sheet, not written by this tool
   // Quantity Status (7062725770645380) — calculated column, not written by this tool
 };
 
@@ -1205,13 +1205,14 @@ async function run() {
       const siblingId = findSiblingId(trusTypeId, destRows);
 
       const cells = [
-        { columnId: COL.trusType,        value: trusTypeId },
-        { columnId: COL.memberID,        value: memberId },
-        { columnId: COL.inspectionTypes, value: rec.inspectionTypes },
-        { columnId: COL.memberSize,      value: rec.memberSize },
-        { columnId: COL.memberQty,       value: parseFloat(rec.qty) || 0 },
-        { columnId: COL.remarks,         value: rec.remarks },
-        { columnId: COL.finalAccDate,    value: normalizeDate(rec.finalAccDate) }
+        { columnId: COL.trusType,         value: trusTypeId },
+        { columnId: COL.memberID,         value: memberId },
+        { columnId: COL.inspectionTypes,  value: rec.inspectionTypes },
+        { columnId: COL.memberSize,       value: rec.memberSize },
+        { columnId: COL.memberQty,        value: parseFloat(rec.qty) || 0 },
+        { columnId: COL.totalQtyRequired, value: parseFloat(matched.totalQty) || 0 },
+        { columnId: COL.remarks,          value: rec.remarks },
+        { columnId: COL.finalAccDate,     value: normalizeDate(rec.finalAccDate) }
       ];
 
       try {
