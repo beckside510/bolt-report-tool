@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Column ID Checker — NorCal Diagnostic</title>
+<style>
+  body { background:#0f0f0f; color:#e8e8e8; font-family:'monospace',monospace; padding:32px 24px; max-width:860px; margin:0 auto; }
+  h1 { color:#e8c547; font-size:16px; margin:0 0 4px; }
+  p { color:#888; font-size:13px; margin:0 0 24px; }
+  label { display:block; font-size:12px; color:#888; margin-bottom:6px; }
+  input { background:#1a1a1a; border:1px solid #333; color:#e8e8e8; padding:8px 12px; width:100%; box-sizing:border-box; font-family:monospace; font-size:13px; border-radius:3px; margin-bottom:12px; }
+  input:focus { outline:none; border-color:#e8c547; }
+  button { background:#e8c547; color:#0f0f0f; border:none; padding:10px 24px; font-family:monospace; font-size:13px; font-weight:600; cursor:pointer; border-radius:3px; }
+  button:disabled { background:#444; color:#666; cursor:default; }
+  #results { margin-top:24px; display:none; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:#888; font-size:11px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #333; padding:8px 12px; }
+  td { padding:8px 12px; border-bottom:1px solid #1f1f1f; font-family:monospace; }
+  td.col-id { color:#e8c547; }
+  td.col-name { color:#e8e8e8; }
+  td.col-type { color:#888; font-size:11px; }
+  .error { color:#e84a4a; margin-top:16px; font-size:13px; }
+  .sheet-label { color:#4ab7e8; font-size:12px; margin-bottom:12px; }
+</style>
+</head>
+<body>
+
+<h1>Column ID Checker</h1>
+<p>Diagnostic tool — open locally, do not deploy. Fetches column names and IDs from a Smartsheet sheet.</p>
+
+<label>Smartsheet API Token</label>
+<input type="password" id="token" placeholder="Paste your API token here">
+
+<label>Sheet ID</label>
+<input type="text" id="sheetId" placeholder="e.g. 3688140496654212" value="3688140496654212">
+
+<button id="fetchBtn" onclick="fetchColumns()">Fetch Columns</button>
+
+<div id="results"></div>
+
+<script>
+const PROXY = 'https://smartsheet-proxy.rebecca-91f.workers.dev/2.0';
+
+async function fetchColumns() {
+  const token = document.getElementById('token').value.trim();
+  const sheetId = document.getElementById('sheetId').value.trim();
+  const btn = document.getElementById('fetchBtn');
+  const results = document.getElementById('results');
+
+  if (!token || !sheetId) {
+    results.style.display = 'block';
+    results.innerHTML = '<div class="error">Please enter both a token and sheet ID.</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Fetching...';
+  results.style.display = 'none';
+
+  try {
+    const res = await fetch(`${PROXY}/sheets/${sheetId}?columnMetadata=true`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      results.style.display = 'block';
+      results.innerHTML = `<div class="error">Error ${res.status}: ${data.message || JSON.stringify(data)}</div>`;
+      return;
+    }
+
+    const cols = data.columns || [];
+    let html = `<div class="sheet-label">Sheet: ${esc(data.name)} &nbsp;|&nbsp; ${cols.length} columns</div>`;
+    html += `<table>
+      <thead><tr><th>#</th><th>Column Name</th><th>Column ID</th><th>Type</th></tr></thead>
+      <tbody>`;
+    cols.forEach((col, i) => {
+      html += `<tr>
+        <td class="col-type">${i + 1}</td>
+        <td class="col-name">${esc(col.title)}</td>
+        <td class="col-id">${col.id}</td>
+        <td class="col-type">${esc(col.type || '')}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    results.style.display = 'block';
+    results.innerHTML = html;
+
+  } catch (err) {
+    results.style.display = 'block';
+    results.innerHTML = `<div class="error">Network error: ${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Fetch Columns';
+  }
+}
+
+function esc(str) {
+  return String(str || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+</script>
+</body>
+</html>
