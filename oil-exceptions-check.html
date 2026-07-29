@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OIL Log Exceptions Check — NorCal Inspection</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg:#0f0f0f; --surface:#1a1a1a; --surface2:#242424; --border:#333;
+  --accent:#e8c547; --accent2:#4ab7e8; --green:#4ae87a; --red:#e84a4a;
+  --orange:#e8944a; --text:#e8e8e8; --text-dim:#888;
+  --mono:'IBM Plex Mono',monospace; --sans:'IBM Plex Sans',sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  padding: 32px 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+/* ── Header ── */
+.header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+.header-icon { font-size: 36px; line-height: 1; }
+.header-text h1 { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--accent); letter-spacing: 0.5px; }
+.header-text p { font-size: 14px; color: var(--text-dim); margin-top: 3px; }
+
+/* ── Instructions ── */
+.instructions {
+  background: rgba(232,197,71,0.07);
+  border: 1px solid rgba(232,197,71,0.2);
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+.instructions strong { color: var(--accent); }
+
+/* ── Panel ── */
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+.panel h2 { font-family: var(--mono); font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px; }
+
+/* ── Token input ── */
+.token-row { display: flex; gap: 10px; align-items: center; }
+.token-input {
+  flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px;
+  padding: 9px 12px; font-family: var(--mono); font-size: 13px; color: var(--text); outline: none;
+  transition: border-color 0.15s;
+}
+.token-input:focus { border-color: var(--accent); }
+.token-status { font-family: var(--mono); font-size: 12px; padding: 4px 10px; border-radius: 4px; white-space: nowrap; }
+.token-status.ok    { color: var(--green); background: rgba(74,232,122,0.1); border: 1px solid rgba(74,232,122,0.2); }
+.token-status.err   { color: var(--red);   background: rgba(232,74,74,0.1);  border: 1px solid rgba(232,74,74,0.2); }
+.token-status.idle  { color: var(--text-dim); background: var(--surface2); border: 1px solid var(--border); }
+.token-status.busy  { color: var(--accent); background: rgba(232,197,71,0.08); border: 1px solid rgba(232,197,71,0.2); }
+.field-hint { font-size: 12px; color: var(--text-dim); margin-top: 8px; }
+
+/* ── Progress bar ── */
+.progress-wrap { margin-top: 14px; display: none; }
+.progress-wrap.visible { display: block; }
+.progress-label { font-family: var(--mono); font-size: 11px; color: var(--text-dim); margin-bottom: 5px; display: flex; justify-content: space-between; }
+.progress-bar-bg { background: var(--surface2); border: 1px solid var(--border); border-radius: 3px; height: 6px; overflow: hidden; }
+.progress-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; width: 0%; transition: width 0.2s; }
+
+/* ── Buttons ── */
+.btn-row { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+.btn {
+  font-family: var(--mono); font-size: 13px; font-weight: 500; padding: 11px 22px; border-radius: 5px;
+  border: none; cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.btn:active:not(:disabled) { transform: scale(0.98); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: #0f0f0f; }
+.btn-primary:hover:not(:disabled) { opacity: 0.88; }
+.btn-danger { background: rgba(232,74,74,0.12); color: var(--red); border: 1px solid rgba(232,74,74,0.3); display: none; }
+.btn-danger.visible { display: inline-flex; }
+.btn-danger:hover:not(:disabled) { background: rgba(232,74,74,0.2); }
+
+/* ── Spinner ── */
+.spinner {
+  width: 13px; height: 13px; border: 2px solid rgba(15,15,15,0.3); border-top-color: #0f0f0f;
+  border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Summary bar ── */
+.summary-bar { display: none; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.summary-bar.visible { display: flex; }
+.stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 14px 20px; min-width: 110px; text-align: center; }
+.stat-val { font-family: var(--mono); font-size: 26px; font-weight: 600; color: var(--accent); line-height: 1; }
+.stat-box.green .stat-val { color: var(--green); }
+.stat-box.orange .stat-val { color: var(--orange); }
+.stat-box.red .stat-val { color: var(--red); }
+.stat-label { font-size: 11px; color: var(--text-dim); margin-top: 5px; text-transform: uppercase; letter-spacing: 0.8px; }
+
+/* ── Log panel ── */
+.log-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: none; margin-bottom: 20px; }
+.log-panel.visible { display: block; }
+.log-header {
+  display: flex; justify-content: space-between; align-items: center; padding: 12px 16px;
+  border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.log-body { padding: 10px 14px; max-height: 320px; overflow-y: auto; font-family: var(--mono); font-size: 12px; line-height: 1.7; }
+.log-line { display: flex; gap: 10px; }
+.log-time { color: var(--text-dim); flex-shrink: 0; }
+.log-info    { color: var(--text-dim); }
+.log-success { color: var(--green); }
+.log-error   { color: var(--red); }
+.log-warn    { color: var(--orange); }
+
+/* ── Records panel ── */
+.records-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: none; margin-bottom: 20px; }
+.records-panel.visible { display: block; }
+.records-panel-header {
+  display: flex; justify-content: space-between; align-items: center; padding: 12px 16px;
+  border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.records-body { padding: 10px; overflow-x: auto; }
+table.records { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+table.records th {
+  text-align: left; color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+  padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+table.records td { padding: 7px 10px; border-bottom: 1px solid rgba(51,51,51,0.5); color: var(--text); vertical-align: top; }
+table.records tr:last-child td { border-bottom: none; }
+.badge { display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 3px; font-family: var(--mono); }
+.badge-skip { background: rgba(136,136,136,0.1); color: var(--text-dim); border: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-icon">&#x1F4CB;</div>
+  <div class="header-text">
+    <h1>OIL Log Exceptions Check</h1>
+    <p>Cross-checks Exceptions against the 4 OIL/BMR logs, adds newly-missing items to the tracking sheet, and flags vanished holds.</p>
+  </div>
+</div>
+
+<div class="instructions">
+  <strong>How to use:</strong> Refresh the source <strong>Exceptions</strong> sheet in Smartsheet first, then paste your API token below and click <strong>Run Check</strong>. New missing exceptions are added to the tracking sheet with Status = <strong>HOLD</strong> — start your 24-hour hold from there. Previously-tracked HOLD rows that disappeared from the source get a note appended, never deleted. Run once per business day.
+</div>
+
+<!-- Step 1: Token -->
+<div class="panel">
+  <h2>Step 1 &mdash; Smartsheet API Token</h2>
+  <div class="token-row">
+    <input type="password" class="token-input" id="tokenInput" placeholder="Paste your Smartsheet API token…" autocomplete="off">
+    <span class="token-status idle" id="tokenStatus">Not verified</span>
+  </div>
+  <div class="field-hint">Stored locally in your browser. Shared token — get it from Rebecca if you don't have one.</div>
+</div>
+
+<!-- Step 2: Run -->
+<div class="panel">
+  <h2>Step 2 &mdash; Run the Check</h2>
+  <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px;">Reads the Exceptions sheet and all 4 destination logs, computes what's missing and what's vanished, and writes the results straight to the tracking sheet.</p>
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-label"><span id="progressLabel">Starting…</span><span id="progressPct">0%</span></div>
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+  </div>
+</div>
+
+<!-- Actions -->
+<div class="btn-row">
+  <button class="btn btn-primary" id="runBtn" disabled>&#x25B6; Run Check</button>
+  <button class="btn btn-danger" id="clearBtn">&#x2715; Clear</button>
+</div>
+
+<!-- Summary -->
+<div class="summary-bar" id="summaryBar">
+  <div class="stat-box green"><div class="stat-val" id="statAdded">0</div><div class="stat-label">Added</div></div>
+  <div class="stat-box orange"><div class="stat-val" id="statVanished">0</div><div class="stat-label">Vanished Flagged</div></div>
+  <div class="stat-box"><div class="stat-val" id="statMatched">0</div><div class="stat-label">Already Logged</div></div>
+  <div class="stat-box red"><div class="stat-val" id="statErrors">0</div><div class="stat-label">Errors</div></div>
+</div>
+
+<!-- Log -->
+<div class="log-panel" id="logPanel">
+  <div class="log-header"><span>Activity Log</span><span id="logCount"></span></div>
+  <div class="log-body" id="logBody"></div>
+</div>
+
+<!-- Newly added -->
+<div class="records-panel" id="newRecordsPanel">
+  <div class="records-panel-header"><span>Newly Added &mdash; Missing From OIL Logs</span><span id="newRecordsCount"></span></div>
+  <div class="records-body">
+    <table class="records">
+      <thead><tr><th>Row</th><th>Ex#</th><th>IR#</th><th>Date</th><th>Inspector</th><th>Description</th><th>Added On</th><th>Desc Match</th></tr></thead>
+      <tbody id="newRecordsTbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Newly vanished -->
+<div class="records-panel" id="vanishedRecordsPanel">
+  <div class="records-panel-header"><span>Newly Flagged &mdash; Vanished From Source</span><span id="vanishedRecordsCount"></span></div>
+  <div class="records-body">
+    <table class="records">
+      <thead><tr><th>Row</th><th>Ex#</th><th>IR#</th><th>Date</th><th>Inspector</th><th>Added On (Original)</th><th>Flag Note</th></tr></thead>
+      <tbody id="vanishedRecordsTbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ── Config ───────────────────────────────────────────────────────────────
+const PROXY = 'https://smartsheet-proxy.rebecca-91f.workers.dev/2.0';
+const LS_TOKEN_KEY = 'oil_check_sm_token';
+
+const SOURCE_SHEET = '2976370849173380';
+const SRC = {
+  exNum: 1988746970173316, seqNum: 6492346597543812, inspRpt: 4240546783858564,
+  ir: 8744146411229060, inspector: 159159621554052, date: 4662759248924548,
+  desc: 5892648903937924, closedBy: 1389049276567428, closeDate: 7018548810780548,
+  resNotes: 2514949183410052
+};
+
+const OUTPUT_SHEET = '4274862406193028';
+const OUT = {
+  exNum: 1112412714733444, seqNum: 5616012342103940, inspRpt: 3364212528418692,
+  ir: 7867812155789188, inspector: 2238312621576068, date: 6741912248946564,
+  desc: 4490112435261316, closedBy: 8993712062631812, closeDate: 12901086957444,
+  resNotes: 4516500714327940, addedOn: 7097754291834756, status: 399410395910020,
+  notes: 1468254757621636
+};
+
+const DEST_SHEETS = [
+  { id: '6569254460542852', name: 'INC 2 OIL LOG',               issueCol: 4174069743964036, irCol: 5109322741403524 },
+  { id: '337192221101956',  name: 'INC 3 OIL LOG',               issueCol: 3560559284539268, irCol: 4524111946272644 },
+  { id: '2734366498180996', name: 'INC 8 OIL LOG',               issueCol: 3360735104372612, irCol: 2234835197529988 },
+  { id: '7967229074165636', name: 'INC 3 Base Metal Repair Log', issueCol: 781820290092932,  irCol: 1907720196935556 }
+];
+
+const EXCLUDE_PHRASES = ['no work performed', 'cancel', 'not ready', 'not performed', 'in progress'];
+const ISSUE_RE = /Exception from (?:CTS\s+)?(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(?:for|under)\s+IR#?\s*(\d+)/i;
+
+// ── State ──────────────────────────────────────────────────────────────────
+let isBusy   = false;
+let tokenOk  = false;
+let logLines = 0;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function log(msg, type = 'info') {
+  const body = document.getElementById('logBody');
+  const now  = new Date();
+  const ts   = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `<span class="log-time">[${ts}]</span><span class="log-${type}">${esc(msg)}</span>`;
+  body.appendChild(line);
+  body.scrollTop = body.scrollHeight;
+  logLines++;
+  document.getElementById('logCount').textContent = `${logLines} lines`;
+  document.getElementById('logPanel').classList.add('visible');
+}
+
+function setProgress(label, pct) {
+  document.getElementById('progressLabel').textContent = label;
+  document.getElementById('progressPct').textContent   = `${Math.round(pct)}%`;
+  document.getElementById('progressFill').style.width  = `${pct}%`;
+}
+
+function updateRunBtn() {
+  document.getElementById('runBtn').disabled = isBusy || !tokenOk;
+}
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function formatMDY(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[2]}/${m[3]}/${m[1]}` : (iso || '');
+}
+
+// Normalizes M/D/YY, M/D/YYYY, or YYYY-MM-DD into YYYY-MM-DD. Unrecognized formats pass through
+// unchanged (comparisons against them will simply fail to match, which is the safe failure mode).
+function normISODate(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim();
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (m) {
+    let [, mm, dd, yy] = m;
+    if (yy.length === 2) yy = '20' + yy;
+    return `${yy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  }
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return s;
+}
+
+function normInspector(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// Extracts IR numbers from destination IR# cells, which range from clean ("6185.0"),
+// to compound ("5395/5497"), to annotated ("6198 (3/13 PO)"), to multi-line ("IR 6648 \n4/10/26 ES; \nIR 6950...").
+function extractIRs(raw) {
+  if (!raw) return [];
+  const s = String(raw).replace(/[\r\n]+/g, ' ').trim();
+  if (/^n\/?a$/i.test(s)) return [];
+  if (/^[\d.]+(\s*\/\s*[\d.]+)*$/.test(s)) {
+    return s.split('/').map(p => p.trim().replace(/\.0$/, '')).filter(Boolean);
+  }
+  const out = [];
+  const re = /IR\s*#?\s*(\d{3,6})/gi;
+  let m;
+  while ((m = re.exec(s))) out.push(m[1]);
+  if (out.length) return [...new Set(out)];
+  const lead = s.match(/^(\d{3,6})/);
+  return lead ? [lead[1]] : [];
+}
+
+function parseIssueText(text) {
+  if (!text) return null;
+  const m = ISSUE_RE.exec(String(text));
+  if (!m) return null;
+  const [, inspector, dateStr] = m;
+  const ir = m[3];
+  const [mm, dd, yy] = dateStr.split('/');
+  const yyyy = yy.length === 2 ? '20' + yy : yy;
+  return {
+    ir,
+    inspector: normInspector(inspector),
+    date: `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`
+  };
+}
+
+function isExcluded(desc) {
+  const d = String(desc || '').toLowerCase();
+  return EXCLUDE_PHRASES.some(p => d.includes(p));
+}
+
+// Shared key-phrase substring test for the 6a/6b description-match checks.
+function keyPhraseMatch(candidateDesc, comparisonText) {
+  const key = String(candidateDesc || '').replace(/^\s+/, '').replace(/[\r\n]+/g, ' ').slice(0, 80).trim();
+  if (key.length < 20) return false;
+  const cmp = String(comparisonText || '').replace(/[\r\n]+/g, ' ').trim();
+  const keyLC = key.toLowerCase(), cmpLC = cmp.toLowerCase();
+  if (cmpLC.includes(keyLC)) return true;
+  if (cmp.length >= 20 && keyLC.includes(cmpLC)) return true;
+  return false;
+}
+
+function dayDiff(iso1, iso2) {
+  const d1 = new Date(iso1 + 'T00:00:00');
+  const d2 = new Date(iso2 + 'T00:00:00');
+  return Math.abs((d1 - d2) / 86400000);
+}
+
+const VANISHED_NOTE_RE = /No longer present in source as of \d{2}\/\d{2}\/\d{4} — may have been removed by inspector; verify before logging\.\s*$/i;
+function endsWithVanishedNote(notes) {
+  return VANISHED_NOTE_RE.test(String(notes || '').trim());
+}
+
+function getCell(row, colId) {
+  return (row.cells || []).find(c => c.columnId === colId);
+}
+function cellVal(row, colId) {
+  const c = getCell(row, colId);
+  if (!c) return '';
+  return c.value !== undefined && c.value !== null ? c.value : (c.displayValue || '');
+}
+
+// ── Token verification ─────────────────────────────────────────────────────
+let tokenTimer = null;
+document.getElementById('tokenInput').addEventListener('input', () => {
+  clearTimeout(tokenTimer);
+  tokenOk = false;
+  updateRunBtn();
+  setTokenStatus('idle', 'Not verified');
+  const val = document.getElementById('tokenInput').value.trim();
+  try { localStorage.setItem(LS_TOKEN_KEY, val); } catch (_) {}
+  if (!val) return;
+  setTokenStatus('busy', 'Verifying…');
+  tokenTimer = setTimeout(() => verifyToken(val), 600);
+});
+
+function setTokenStatus(cls, text) {
+  const el = document.getElementById('tokenStatus');
+  el.className = `token-status ${cls}`;
+  el.textContent = text;
+}
+
+async function verifyToken(token) {
+  try {
+    const res = await fetch(`${PROXY}/sheets/${OUTPUT_SHEET}?pageSize=1`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (res.ok) {
+      tokenOk = true;
+      setTokenStatus('ok', '✓ Connected');
+    } else {
+      tokenOk = false;
+      setTokenStatus('err', `Error ${res.status}`);
+    }
+  } catch (e) {
+    tokenOk = false;
+    setTokenStatus('err', 'Connection failed');
+  }
+  updateRunBtn();
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  let saved = '';
+  try { saved = localStorage.getItem(LS_TOKEN_KEY) || ''; } catch (_) {}
+  if (saved) {
+    document.getElementById('tokenInput').value = saved;
+    setTokenStatus('busy', 'Verifying…');
+    verifyToken(saved);
+  }
+});
+
+// ── Smartsheet fetch helper ─────────────────────────────────────────────────
+async function fetchSheet(token, sheetId) {
+  const res = await fetch(`${PROXY}/sheets/${sheetId}?pageSize=10000`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Sheet ${sheetId} fetch failed: ${res.status} ${txt.slice(0, 150)}`);
+  }
+  return res.json();
+}
+
+// ── Table row builders ──────────────────────────────────────────────────────
+function buildNewRow(c, rowNumber) {
+  const flat = String(c.desc || '').replace(/[\r\n]+/g, ' ');
+  const descShort = esc(flat.slice(0, 80)) + (flat.length > 80 ? '…' : '');
+  return `<tr>
+    <td>${esc(rowNumber || '')}</td>
+    <td>${esc(c.exNum || '')}</td>
+    <td>${esc(c.ir)}</td>
+    <td>${esc(formatMDY(c.date))}</td>
+    <td>${esc(c.inspector)}</td>
+    <td>${descShort}</td>
+    <td>${esc(formatMDY(todayISO()))}</td>
+    <td>${c.matchTag ? `<span class="badge badge-skip">${esc(c.matchTag)}</span>` : ''}</td>
+  </tr>`;
+}
+
+function buildVanishedRow(v) {
+  return `<tr>
+    <td>${esc(v.rowNumber || '')}</td>
+    <td>${esc(v.exNum || '')}</td>
+    <td>${esc(v.ir)}</td>
+    <td>${esc(formatMDY(v.date))}</td>
+    <td>${esc(v.inspector)}</td>
+    <td>${esc(formatMDY(normISODate(v.addedOn)))}</td>
+    <td>${esc(v.newNote)}</td>
+  </tr>`;
+}
+
+// ── Main run ─────────────────────────────────────────────────────────────
+document.getElementById('runBtn').addEventListener('click', run);
+document.getElementById('clearBtn').addEventListener('click', () => {
+  resetUI();
+  document.getElementById('clearBtn').classList.remove('visible');
+  document.getElementById('progressWrap').classList.remove('visible');
+});
+
+function resetUI() {
+  document.getElementById('summaryBar').classList.remove('visible');
+  document.getElementById('logBody').innerHTML = '';
+  logLines = 0;
+  document.getElementById('logPanel').classList.remove('visible');
+  document.getElementById('newRecordsPanel').classList.remove('visible');
+  document.getElementById('newRecordsTbody').innerHTML = '';
+  document.getElementById('vanishedRecordsPanel').classList.remove('visible');
+  document.getElementById('vanishedRecordsTbody').innerHTML = '';
+  document.getElementById('progressWrap').classList.add('visible');
+  setProgress('Starting…', 0);
+}
+
+async function run() {
+  if (isBusy) return;
+  isBusy = true;
+  updateRunBtn();
+  resetUI();
+
+  const token = document.getElementById('tokenInput').value.trim();
+  const btn   = document.getElementById('runBtn');
+  btn.innerHTML = '<span class="spinner"></span> Running…';
+
+  const stats = { added: 0, vanished: 0, matched: 0, errors: 0 };
+  let newRowsHtml = '', vanishedRowsHtml = '';
+
+  try {
+    setProgress('Loading source Exceptions sheet…', 5);
+    log('Loading source Exceptions sheet…', 'info');
+    const srcData = await fetchSheet(token, SOURCE_SHEET);
+    log(`Loaded ${srcData.rows.length} source row(s).`, 'success');
+
+    setProgress('Loading 4 destination OIL/BMR logs…', 20);
+    log('Loading destination OIL/BMR logs (4 sheets)…', 'info');
+    const destDataArr = await Promise.all(DEST_SHEETS.map(d => fetchSheet(token, d.id)));
+    destDataArr.forEach((d, i) => log(`${DEST_SHEETS[i].name}: ${d.rows.length} row(s) loaded.`, 'success'));
+
+    setProgress('Loading tracking sheet…', 40);
+    log('Loading tracking sheet (Exceptions Not on OIL Logs)…', 'info');
+    const outData = await fetchSheet(token, OUTPUT_SHEET);
+    log(`Loaded ${outData.rows.length} tracked row(s).`, 'success');
+
+    setProgress('Parsing destination logs…', 50);
+    const parsedDestKeys = new Set();
+    const unparsedDestIRCounts = {};
+    const unparsedDestRows = {};
+
+    destDataArr.forEach((d, i) => {
+      const meta = DEST_SHEETS[i];
+      d.rows.forEach(row => {
+        const issueText = String(cellVal(row, meta.issueCol) || '');
+        const parsed = parseIssueText(issueText);
+        if (parsed) {
+          parsedDestKeys.add(`${parsed.ir}|${parsed.inspector}|${parsed.date}`);
+        } else {
+          const irs = extractIRs(cellVal(row, meta.irCol));
+          irs.forEach(ir => {
+            unparsedDestIRCounts[ir] = (unparsedDestIRCounts[ir] || 0) + 1;
+            (unparsedDestRows[ir] = unparsedDestRows[ir] || []).push({ sheet: meta.name, text: issueText });
+          });
+        }
+      });
+    });
+    log(`Parsed ${parsedDestKeys.size} exact-match destination key(s); residual coverage tracked for ${Object.keys(unparsedDestIRCounts).length} IR#(s).`, 'info');
+
+    setProgress('Applying exclusion filter…', 55);
+    const filteredSource = [];
+    let excludedCount = 0, skippedIncomplete = 0;
+    srcData.rows.forEach(row => {
+      const ir = String(cellVal(row, SRC.ir) || '').trim();
+      const inspector = String(cellVal(row, SRC.inspector) || '').trim();
+      const dateRaw = cellVal(row, SRC.date);
+      const desc = String(cellVal(row, SRC.desc) || '');
+      if (!ir || !inspector || !dateRaw) { skippedIncomplete++; return; }
+      if (isExcluded(desc)) { excludedCount++; return; }
+      filteredSource.push({
+        rowId: row.id,
+        exNum: cellVal(row, SRC.exNum),
+        seqNum: cellVal(row, SRC.seqNum),
+        inspRpt: cellVal(row, SRC.inspRpt),
+        ir, inspector,
+        inspectorNorm: normInspector(inspector),
+        date: normISODate(dateRaw),
+        desc,
+        closedBy: cellVal(row, SRC.closedBy),
+        closeDate: cellVal(row, SRC.closeDate),
+        resNotes: cellVal(row, SRC.resNotes)
+      });
+    });
+    log(`${filteredSource.length} eligible source row(s) after exclusion filter (excluded ${excludedCount}, skipped ${skippedIncomplete} incomplete).`, 'info');
+
+    setProgress('Exact-matching against destination logs…', 65);
+    const residualPool = {};
+    let exactMatched = 0;
+    filteredSource.forEach(r => {
+      const key = `${r.ir}|${r.inspectorNorm}|${r.date}`;
+      if (parsedDestKeys.has(key)) { exactMatched++; return; }
+      (residualPool[r.ir] = residualPool[r.ir] || []).push(r);
+    });
+    stats.matched = exactMatched;
+    log(`${exactMatched} row(s) definitively matched via exact-key parse. ${Object.keys(residualPool).length} IR#(s) have a residual pool.`, 'info');
+
+    setProgress('Deduping against tracking sheet…', 75);
+    const historicalKeys = new Set();
+    const activeKeys = new Set();
+    const irInspectorIndex = {};
+    outData.rows.forEach(row => {
+      const ir = String(cellVal(row, OUT.ir) || '').trim();
+      const inspectorNorm = normInspector(cellVal(row, OUT.inspector));
+      const date = normISODate(cellVal(row, OUT.date));
+      if (!ir || !inspectorNorm || !date) return;
+      const key = `${ir}|${inspectorNorm}|${date}`;
+      historicalKeys.add(key);
+      const status = cellVal(row, OUT.status);
+      if (status === 'HOLD') activeKeys.add(key);
+      const idxKey = `${ir}|${inspectorNorm}`;
+      (irInspectorIndex[idxKey] = irInspectorIndex[idxKey] || []).push({
+        exNum: cellVal(row, OUT.exNum), date, desc: String(cellVal(row, OUT.desc) || '')
+      });
+    });
+
+    const candidates = [];
+    Object.keys(residualPool).forEach(ir => {
+      const pool = residualPool[ir];
+      const quota = Math.max(0, pool.length - (unparsedDestIRCounts[ir] || 0));
+      const untracked = pool.filter(r => !historicalKeys.has(`${r.ir}|${r.inspectorNorm}|${r.date}`));
+      if (quota <= 0 || untracked.length === 0) return;
+      let selected = untracked;
+      if (untracked.length > quota) {
+        selected = [...untracked].sort((a, b) => {
+          if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+          return String(a.exNum).localeCompare(String(b.exNum), undefined, { numeric: true });
+        }).slice(0, quota);
+      }
+      selected.forEach(r => candidates.push({ ...r, ir }));
+    });
+    log(`${candidates.length} genuinely new missing exception(s) identified.`, candidates.length ? 'success' : 'info');
+
+    setProgress('Checking for duplicates / partial coverage…', 80);
+    const finalNew = candidates.map(c => {
+      let note6a = null, note6b = null;
+      if ((unparsedDestIRCounts[c.ir] || 0) > 0) {
+        for (const dr of (unparsedDestRows[c.ir] || [])) {
+          if (keyPhraseMatch(c.desc, dr.text)) { note6a = dr.sheet; break; }
+        }
+      }
+      const trackedSame = irInspectorIndex[`${c.ir}|${c.inspectorNorm}`] || [];
+      for (const t of trackedSame) {
+        const diff = dayDiff(c.date, t.date);
+        if (diff <= 3 && keyPhraseMatch(c.desc, t.desc)) {
+          note6b = { exNum: t.exNum, date: t.date, days: Math.round(diff) };
+          break;
+        }
+      }
+      let trackingNotes = '', matchTag = '';
+      const sentence6a = note6a ? `⚠️ Similar description found on ${note6a}, IR#${c.ir} — verify not already logged before creating a new entry.` : '';
+      const sentence6b = note6b ? `⚠️ Possible duplicate of Ex#${note6b.exNum} — same IR# and Inspector, tracked ${formatMDY(note6b.date)}, ${note6b.days} day(s) apart, descriptions overlap. Confirm this is a distinct occurrence before logging.` : '';
+      if (note6a && note6b) { trackingNotes = `${sentence6a} ${sentence6b}`; matchTag = '6a+6b'; }
+      else if (note6a)      { trackingNotes = sentence6a; matchTag = '6a'; }
+      else if (note6b)      { trackingNotes = sentence6b; matchTag = '6b'; }
+      return { ...c, trackingNotes, matchTag };
+    });
+
+    if (finalNew.length) {
+      setProgress('Writing new rows to tracking sheet…', 90);
+      const rowDefs = finalNew.map(c => {
+        const cells = [
+          { columnId: OUT.seqNum, value: c.seqNum || '' },
+          { columnId: OUT.inspRpt, value: c.inspRpt || '' },
+          { columnId: OUT.ir, value: c.ir },
+          { columnId: OUT.inspector, value: c.inspector },
+          { columnId: OUT.date, value: c.date },
+          { columnId: OUT.desc, value: c.desc },
+          { columnId: OUT.closedBy, value: c.closedBy || '' },
+          { columnId: OUT.resNotes, value: c.resNotes || '' },
+          { columnId: OUT.addedOn, value: todayISO() },
+          { columnId: OUT.status, value: 'HOLD' },
+          { columnId: OUT.notes, value: c.trackingNotes }
+        ];
+        const closeDateISO = c.closeDate ? normISODate(c.closeDate) : '';
+        if (closeDateISO) cells.push({ columnId: OUT.closeDate, value: closeDateISO });
+        return { toBottom: true, cells };
+      });
+
+      const res = await fetch(`${PROXY}/sheets/${OUTPUT_SHEET}/rows`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(rowDefs)
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Add rows failed: ${res.status} ${txt.slice(0, 200)}`);
+      }
+      const addResult = await res.json();
+      const newRows = addResult.result || addResult.rows || [];
+      finalNew.forEach((c, i) => {
+        const newRow = newRows[i];
+        log(`ADDED — Ex#${c.exNum} / IR#${c.ir} / ${c.inspector} (${formatMDY(c.date)})${c.matchTag ? ' — flagged ' + c.matchTag : ''}`, 'success');
+        newRowsHtml += buildNewRow(c, newRow ? newRow.rowNumber : '');
+      });
+      stats.added = finalNew.length;
+    } else {
+      log('No new missing exceptions to add.', 'info');
+    }
+
+    setProgress('Checking for vanished tracked items…', 95);
+    const todaySourceKeys = new Set(filteredSource.map(r => `${r.ir}|${r.inspectorNorm}|${r.date}`));
+    const vanishedUpdates = [];
+    outData.rows.forEach(row => {
+      const ir = String(cellVal(row, OUT.ir) || '').trim();
+      const inspectorNorm = normInspector(cellVal(row, OUT.inspector));
+      const date = normISODate(cellVal(row, OUT.date));
+      if (!ir || !inspectorNorm || !date) return;
+      if (cellVal(row, OUT.status) !== 'HOLD') return;
+      const key = `${ir}|${inspectorNorm}|${date}`;
+      if (todaySourceKeys.has(key)) return;
+      const existingNotes = String(cellVal(row, OUT.notes) || '');
+      if (endsWithVanishedNote(existingNotes)) return;
+      const newNote = (existingNotes.trim() ? existingNotes.trim() + ' ' : '') +
+        `⚠️ No longer present in source as of ${formatMDY(todayISO())} — may have been removed by inspector; verify before logging.`;
+      vanishedUpdates.push({
+        rowId: row.id,
+        rowNumber: row.rowNumber,
+        exNum: cellVal(row, OUT.exNum),
+        ir, inspector: cellVal(row, OUT.inspector), date,
+        addedOn: cellVal(row, OUT.addedOn),
+        newNote
+      });
+    });
+
+    if (vanishedUpdates.length) {
+      const res = await fetch(`${PROXY}/sheets/${OUTPUT_SHEET}/rows`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(vanishedUpdates.map(v => ({ id: v.rowId, cells: [{ columnId: OUT.notes, value: v.newNote }] })))
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Update rows failed: ${res.status} ${txt.slice(0, 200)}`);
+      }
+      vanishedUpdates.forEach(v => {
+        log(`VANISHED — Ex#${v.exNum} / IR#${v.ir} / ${v.inspector} (${formatMDY(v.date)}) flagged.`, 'warn');
+        vanishedRowsHtml += buildVanishedRow(v);
+      });
+      stats.vanished = vanishedUpdates.length;
+    } else {
+      log('No previously-tracked items vanished from source.', 'info');
+    }
+
+    setProgress('Done.', 100);
+  } catch (err) {
+    log(`ERROR — ${err.message}`, 'error');
+    stats.errors++;
+  } finally {
+    isBusy = false;
+    btn.innerHTML = '&#x25B6; Run Check';
+    updateRunBtn();
+
+    document.getElementById('statAdded').textContent    = stats.added;
+    document.getElementById('statVanished').textContent = stats.vanished;
+    document.getElementById('statMatched').textContent  = stats.matched;
+    document.getElementById('statErrors').textContent   = stats.errors;
+    document.getElementById('summaryBar').classList.add('visible');
+    document.getElementById('clearBtn').classList.add('visible');
+
+    if (newRowsHtml) {
+      document.getElementById('newRecordsTbody').innerHTML = newRowsHtml;
+      document.getElementById('newRecordsPanel').classList.add('visible');
+      document.getElementById('newRecordsCount').textContent = `${stats.added} row(s)`;
+    }
+    if (vanishedRowsHtml) {
+      document.getElementById('vanishedRecordsTbody').innerHTML = vanishedRowsHtml;
+      document.getElementById('vanishedRecordsPanel').classList.add('visible');
+      document.getElementById('vanishedRecordsCount').textContent = `${stats.vanished} row(s)`;
+    }
+
+    log(`Run complete — ${stats.added} added, ${stats.vanished} vanished-flagged, ${stats.matched} exact-matched, ${stats.errors} error(s).`, stats.errors ? 'warn' : 'success');
+  }
+}
+</script>
+</body>
+</html>
