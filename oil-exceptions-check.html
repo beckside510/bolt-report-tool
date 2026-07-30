@@ -137,6 +137,22 @@ table.records td { padding: 7px 10px; border-bottom: 1px solid rgba(51,51,51,0.5
 table.records tr:last-child td { border-bottom: none; }
 .badge { display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 3px; font-family: var(--mono); }
 .badge-skip { background: rgba(136,136,136,0.1); color: var(--text-dim); border: 1px solid var(--border); }
+.badge-tracked { background: rgba(136,136,136,0.1); color: var(--text-dim); border: 1px solid var(--border); }
+.badge-selected { background: rgba(74,232,122,0.1); color: var(--green); border: 1px solid rgba(74,232,122,0.3); }
+.badge-capped { background: rgba(232,148,74,0.12); color: var(--orange); border: 1px solid rgba(232,148,74,0.3); }
+
+/* -- Diagnostics tabs -- */
+.diag-tab-bar { display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.diag-tab-btn {
+  background: none; border: none; color: var(--text-dim); font-family: var(--mono); font-size: 12px;
+  padding: 11px 14px; cursor: pointer; border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 7px;
+}
+.diag-tab-btn:hover { color: var(--text); }
+.diag-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.diag-tab-count { background: var(--surface2); border-radius: 10px; padding: 1px 8px; font-size: 10px; }
+.diag-tab-content { display: none; padding: 4px 10px 10px; overflow-x: auto; }
+.diag-tab-content.active { display: block; }
+.diag-note { font-size: 12px; color: var(--text-dim); padding: 10px 6px 4px; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -215,6 +231,46 @@ table.records tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
+<!-- Diagnostics -->
+<div class="records-panel" id="diagPanel">
+  <div class="records-panel-header"><span>Diagnostics &mdash; Assessment Detail</span><span id="diagHeaderCount"></span></div>
+  <div class="diag-tab-bar">
+    <button class="diag-tab-btn active" data-tab="incomplete">Incomplete <span class="diag-tab-count" id="diagCountIncomplete">0</span></button>
+    <button class="diag-tab-btn" data-tab="residual">Residual Pool <span class="diag-tab-count" id="diagCountResidual">0</span></button>
+    <button class="diag-tab-btn" data-tab="countbased">Count-Based Assessment <span class="diag-tab-count" id="diagCountCountbased">0</span></button>
+  </div>
+
+  <div class="diag-tab-content active" id="diagTab-incomplete">
+    <div class="diag-note">Source rows skipped entirely because IR#, Inspector, or Date was blank &mdash; there's no usable match key, so these were never checked against the logs at all.</div>
+    <div class="records-body">
+      <table class="records">
+        <thead><tr><th>Row</th><th>Ex#</th><th>IR#</th><th>Inspector</th><th>Date</th><th>Missing</th><th>Description</th></tr></thead>
+        <tbody id="diagIncompleteTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="diag-tab-content" id="diagTab-residual">
+    <div class="diag-note">Source rows whose (IR#, Inspector, Date) did not exact-match any parsed destination-log entry. These fell through to the count-based fallback below, scoped per IR#.</div>
+    <div class="records-body">
+      <table class="records">
+        <thead><tr><th>IR#</th><th>Ex#</th><th>Inspector</th><th>Date</th><th>Dest. Unparsed Coverage</th><th>Description</th></tr></thead>
+        <tbody id="diagResidualTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="diag-tab-content" id="diagTab-countbased">
+    <div class="diag-note">Per row: how the old count-based fallback resolved it. <span class="badge badge-tracked">tracked</span> = already on the tracking sheet. <span class="badge badge-selected">selected</span> = flagged missing this run. <span class="badge badge-capped">capped</span> = untracked but the per-IR# quota ran out first &mdash; the row most worth checking by hand for a "ghost."</div>
+    <div class="records-body">
+      <table class="records">
+        <thead><tr><th>IR#</th><th>Pool/Dest/Quota</th><th>Ex#</th><th>Inspector</th><th>Date</th><th>Verdict</th><th>Description</th></tr></thead>
+        <tbody id="diagCountbasedTbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── Config ───────────────────────────────────────────────────────────────
 const PROXY = 'https://smartsheet-proxy.rebecca-91f.workers.dev/2.0';
@@ -251,6 +307,16 @@ const ISSUE_RE = /Exception from (?:CTS\s+)?(.+?)\s+on\s+(\d{1,2}\/\d{1,2}\/\d{2
 let isBusy   = false;
 let tokenOk  = false;
 let logLines = 0;
+
+// ── Diagnostics tab switching ───────────────────────────────────────────────
+document.querySelectorAll('.diag-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.diag-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.diag-tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`diagTab-${btn.dataset.tab}`).classList.add('active');
+  });
+});
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function esc(str) {
@@ -471,6 +537,48 @@ function buildVanishedRow(v) {
   </tr>`;
 }
 
+function shortDesc(desc, n = 90) {
+  const flat = String(desc || '').replace(/[\r\n]+/g, ' ');
+  return esc(flat.slice(0, n)) + (flat.length > n ? '…' : '');
+}
+
+function buildIncompleteRow(r) {
+  return `<tr>
+    <td>${esc(r.rowNumber || '')}</td>
+    <td>${esc(r.exNum || '')}</td>
+    <td>${esc(r.ir || '')}</td>
+    <td>${esc(r.inspector || '')}</td>
+    <td>${esc(r.date || '')}</td>
+    <td><span class="badge badge-skip">${esc(r.missing)}</span></td>
+    <td>${shortDesc(r.desc)}</td>
+  </tr>`;
+}
+
+function buildResidualRow(r) {
+  return `<tr>
+    <td>${esc(r.ir)}</td>
+    <td>${esc(r.exNum || '')}</td>
+    <td>${esc(r.inspector)}</td>
+    <td>${esc(formatMDY(r.date))}</td>
+    <td>${r.destCoverage}</td>
+    <td>${shortDesc(r.desc)}</td>
+  </tr>`;
+}
+
+function buildCountBasedRow(r) {
+  const badgeCls = r.verdict === 'selected' ? 'badge-selected' : r.verdict === 'capped' ? 'badge-capped' : 'badge-tracked';
+  const label = r.verdict === 'selected' ? 'selected — flagged missing' : r.verdict === 'capped' ? 'capped — quota exhausted' : 'already tracked';
+  return `<tr>
+    <td>${esc(r.ir)}</td>
+    <td>${esc(r.poolSize)}/${esc(r.destCoverage)}/${esc(r.quota)}</td>
+    <td>${esc(r.exNum || '')}</td>
+    <td>${esc(r.inspector)}</td>
+    <td>${esc(formatMDY(r.date))}</td>
+    <td><span class="badge ${badgeCls}">${label}</span></td>
+    <td>${shortDesc(r.desc)}</td>
+  </tr>`;
+}
+
 // ── Main run ─────────────────────────────────────────────────────────────
 document.getElementById('runBtn').addEventListener('click', run);
 document.getElementById('clearBtn').addEventListener('click', () => {
@@ -488,6 +596,10 @@ function resetUI() {
   document.getElementById('newRecordsTbody').innerHTML = '';
   document.getElementById('vanishedRecordsPanel').classList.remove('visible');
   document.getElementById('vanishedRecordsTbody').innerHTML = '';
+  document.getElementById('diagPanel').classList.remove('visible');
+  document.getElementById('diagIncompleteTbody').innerHTML = '';
+  document.getElementById('diagResidualTbody').innerHTML = '';
+  document.getElementById('diagCountbasedTbody').innerHTML = '';
   document.getElementById('progressWrap').classList.add('visible');
   setProgress('Starting…', 0);
 }
@@ -504,6 +616,7 @@ async function run() {
 
   const stats = { added: 0, vanished: 0, matched: 0, errors: 0 };
   let newRowsHtml = '', vanishedRowsHtml = '';
+  let incompleteRows = [], residualPoolRows = [], countBasedRows = [];
 
   try {
     setProgress('Loading source Exceptions sheet…', 5);
@@ -552,7 +665,18 @@ async function run() {
       const inspector = String(cellVal(row, SRC.inspector) || '').trim();
       const dateRaw = cellVal(row, SRC.date);
       const desc = String(cellVal(row, SRC.desc) || '');
-      if (!ir || !inspector || !dateRaw) { skippedIncomplete++; return; }
+      if (!ir || !inspector || !dateRaw) {
+        skippedIncomplete++;
+        const missing = [];
+        if (!ir) missing.push('IR#');
+        if (!inspector) missing.push('Inspector');
+        if (!dateRaw) missing.push('Date');
+        incompleteRows.push({
+          rowNumber: row.rowNumber, exNum: cellVal(row, SRC.exNum),
+          ir, inspector, date: dateRaw, desc, missing: missing.join(', ')
+        });
+        return;
+      }
       if (isExcluded(desc)) { excludedCount++; return; }
       filteredSource.push({
         rowId: row.id,
@@ -603,17 +727,33 @@ async function run() {
     const candidates = [];
     Object.keys(residualPool).forEach(ir => {
       const pool = residualPool[ir];
-      const quota = Math.max(0, pool.length - (unparsedDestIRCounts[ir] || 0));
+      const destCoverage = unparsedDestIRCounts[ir] || 0;
+      const quota = Math.max(0, pool.length - destCoverage);
+      pool.forEach(r => residualPoolRows.push({ ...r, ir, destCoverage }));
+
       const untracked = pool.filter(r => !historicalKeys.has(`${r.ir}|${r.inspectorNorm}|${r.date}`));
-      if (quota <= 0 || untracked.length === 0) return;
-      let selected = untracked;
-      if (untracked.length > quota) {
-        selected = [...untracked].sort((a, b) => {
-          if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-          return String(a.exNum).localeCompare(String(b.exNum), undefined, { numeric: true });
-        }).slice(0, quota);
+      let selected = [], capped = [];
+      if (quota > 0 && untracked.length > 0) {
+        if (untracked.length > quota) {
+          const sorted = [...untracked].sort((a, b) => {
+            if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+            return String(a.exNum).localeCompare(String(b.exNum), undefined, { numeric: true });
+          });
+          selected = sorted.slice(0, quota);
+          capped = sorted.slice(quota);
+        } else {
+          selected = untracked;
+        }
+      } else {
+        capped = untracked;
       }
       selected.forEach(r => candidates.push({ ...r, ir }));
+
+      pool.forEach(r => {
+        const isUntracked = untracked.includes(r);
+        const verdict = !isUntracked ? 'tracked' : (selected.includes(r) ? 'selected' : 'capped');
+        countBasedRows.push({ ...r, ir, poolSize: pool.length, destCoverage, quota, verdict });
+      });
     });
     log(`${candidates.length} genuinely new missing exception(s) identified.`, candidates.length ? 'success' : 'info');
 
@@ -754,6 +894,24 @@ async function run() {
       document.getElementById('vanishedRecordsPanel').classList.add('visible');
       document.getElementById('vanishedRecordsCount').textContent = `${stats.vanished} row(s)`;
     }
+
+    document.getElementById('diagPanel').classList.add('visible');
+    document.getElementById('diagHeaderCount').textContent =
+      `${incompleteRows.length} incomplete · ${residualPoolRows.length} residual · ${countBasedRows.length} count-based`;
+
+    document.getElementById('diagIncompleteTbody').innerHTML = incompleteRows.map(buildIncompleteRow).join('');
+    document.getElementById('diagCountIncomplete').textContent = incompleteRows.length;
+
+    const sortedResidual = [...residualPoolRows].sort((a, b) => a.ir.localeCompare(b.ir, undefined, { numeric: true }) || (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    document.getElementById('diagResidualTbody').innerHTML = sortedResidual.map(buildResidualRow).join('');
+    document.getElementById('diagCountResidual').textContent = residualPoolRows.length;
+
+    const sortedCountBased = [...countBasedRows].sort((a, b) => a.ir.localeCompare(b.ir, undefined, { numeric: true }) || (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    document.getElementById('diagCountbasedTbody').innerHTML = sortedCountBased.map(buildCountBasedRow).join('');
+    document.getElementById('diagCountCountbased').textContent = countBasedRows.length;
+
+    const cappedCount = countBasedRows.filter(r => r.verdict === 'capped').length;
+    if (cappedCount) log(`${cappedCount} residual row(s) capped out by quota — potential ghosts, see Diagnostics tab.`, 'warn');
 
     log(`Run complete — ${stats.added} added, ${stats.vanished} vanished-flagged, ${stats.matched} exact-matched, ${stats.errors} error(s).`, stats.errors ? 'warn' : 'success');
   }
