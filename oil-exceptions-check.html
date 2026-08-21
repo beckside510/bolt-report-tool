@@ -199,6 +199,7 @@ table.records tr:last-child td { border-bottom: none; }
 <div class="summary-bar" id="summaryBar">
   <div class="stat-box green"><div class="stat-val" id="statAdded">0</div><div class="stat-label">Added</div></div>
   <div class="stat-box orange"><div class="stat-val" id="statVanished">0</div><div class="stat-label">Vanished Flagged</div></div>
+  <div class="stat-box green"><div class="stat-val" id="statReappeared">0</div><div class="stat-label">Reappeared Flagged</div></div>
   <div class="stat-box"><div class="stat-val" id="statMatched">0</div><div class="stat-label">Already Logged</div></div>
   <div class="stat-box red"><div class="stat-val" id="statErrors">0</div><div class="stat-label">Errors</div></div>
 </div>
@@ -227,6 +228,17 @@ table.records tr:last-child td { border-bottom: none; }
     <table class="records">
       <thead><tr><th>Row</th><th>Ex#</th><th>IR#</th><th>Date</th><th>Inspector</th><th>Added On (Original)</th><th>Flag Note</th></tr></thead>
       <tbody id="vanishedRecordsTbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Newly reappeared -->
+<div class="records-panel" id="reappearedRecordsPanel">
+  <div class="records-panel-header"><span>Newly Flagged &mdash; Reappeared In Source</span><span id="reappearedRecordsCount"></span></div>
+  <div class="records-body">
+    <table class="records">
+      <thead><tr><th>Row</th><th>Ex#</th><th>IR#</th><th>Date</th><th>Inspector</th><th>Added On (Original)</th><th>Flag Note</th></tr></thead>
+      <tbody id="reappearedRecordsTbody"></tbody>
     </table>
   </div>
 </div>
@@ -438,6 +450,14 @@ const VANISHED_NOTE_RE = /No longer present in source as of \d{2}\/\d{2}\/\d{4} 
 function endsWithVanishedNote(notes) {
   return VANISHED_NOTE_RE.test(String(notes || '').trim());
 }
+const VANISHED_NOTE_ANY_RE = /No longer present in source as of \d{2}\/\d{2}\/\d{4} — may have been removed by inspector; verify before logging\./i;
+function hasVanishedNote(notes) {
+  return VANISHED_NOTE_ANY_RE.test(String(notes || ''));
+}
+const REAPPEARED_NOTE_RE = /Reappeared in source as of \d{2}\/\d{2}\/\d{4} — previously flagged vanished; verify current status\.\s*$/i;
+function endsWithReappearedNote(notes) {
+  return REAPPEARED_NOTE_RE.test(String(notes || '').trim());
+}
 
 function getCell(row, colId) {
   return (row.cells || []).find(c => c.columnId === colId);
@@ -537,6 +557,18 @@ function buildVanishedRow(v) {
   </tr>`;
 }
 
+function buildReappearedRow(v) {
+  return `<tr>
+    <td>${esc(v.rowNumber || '')}</td>
+    <td>${esc(v.exNum || '')}</td>
+    <td>${esc(v.ir)}</td>
+    <td>${esc(formatMDY(v.date))}</td>
+    <td>${esc(v.inspector)}</td>
+    <td>${esc(formatMDY(normISODate(v.addedOn)))}</td>
+    <td>${esc(v.newNote)}</td>
+  </tr>`;
+}
+
 function shortDesc(desc, n = 90) {
   const flat = String(desc || '').replace(/[\r\n]+/g, ' ');
   return esc(flat.slice(0, n)) + (flat.length > n ? '…' : '');
@@ -596,6 +628,8 @@ function resetUI() {
   document.getElementById('newRecordsTbody').innerHTML = '';
   document.getElementById('vanishedRecordsPanel').classList.remove('visible');
   document.getElementById('vanishedRecordsTbody').innerHTML = '';
+  document.getElementById('reappearedRecordsPanel').classList.remove('visible');
+  document.getElementById('reappearedRecordsTbody').innerHTML = '';
   document.getElementById('diagPanel').classList.remove('visible');
   document.getElementById('diagIncompleteTbody').innerHTML = '';
   document.getElementById('diagResidualTbody').innerHTML = '';
@@ -614,8 +648,8 @@ async function run() {
   const btn   = document.getElementById('runBtn');
   btn.innerHTML = '<span class="spinner"></span> Running…';
 
-  const stats = { added: 0, vanished: 0, matched: 0, errors: 0 };
-  let newRowsHtml = '', vanishedRowsHtml = '';
+  const stats = { added: 0, vanished: 0, reappeared: 0, matched: 0, errors: 0 };
+  let newRowsHtml = '', vanishedRowsHtml = '', reappearedRowsHtml = '';
   let incompleteRows = [], residualPoolRows = [], countBasedRows = [];
 
   try {
@@ -782,6 +816,10 @@ async function run() {
       return { ...c, trackingNotes, matchTag };
     });
 
+    // Chronological order by Ex# — applies to both the sheet write (row order
+    // within the toBottom batch) and the "Newly Added" table below.
+    finalNew.sort((a, b) => String(a.exNum).localeCompare(String(b.exNum), undefined, { numeric: true }));
+
     if (finalNew.length) {
       setProgress('Writing new rows to tracking sheet…', 90);
       const rowDefs = finalNew.map(c => {
@@ -824,9 +862,10 @@ async function run() {
       log('No new missing exceptions to add.', 'info');
     }
 
-    setProgress('Checking for vanished tracked items…', 95);
+    setProgress('Checking for vanished / reappeared tracked items…', 95);
     const todaySourceKeys = new Set(filteredSource.map(r => `${r.ir}|${r.inspectorNorm}|${r.date}`));
     const vanishedUpdates = [];
+    const reappearedUpdates = [];
     outData.rows.forEach(row => {
       const ir = String(cellVal(row, OUT.ir) || '').trim();
       const inspectorNorm = normInspector(cellVal(row, OUT.inspector));
@@ -834,8 +873,28 @@ async function run() {
       if (!ir || !inspectorNorm || !date) return;
       if (cellVal(row, OUT.status) !== 'HOLD') return;
       const key = `${ir}|${inspectorNorm}|${date}`;
-      if (todaySourceKeys.has(key)) return;
       const existingNotes = String(cellVal(row, OUT.notes) || '');
+      const presentToday = todaySourceKeys.has(key);
+
+      if (presentToday) {
+        // Back in the source — if it was previously flagged vanished and hasn't
+        // already been flagged reappeared since, append a note (never remove/edit
+        // the original vanished note — full history stays in Tracking Notes).
+        if (hasVanishedNote(existingNotes) && !endsWithReappearedNote(existingNotes)) {
+          const newNote = (existingNotes.trim() ? existingNotes.trim() + ' ' : '') +
+            `✅ Reappeared in source as of ${formatMDY(todayISO())} — previously flagged vanished; verify current status.`;
+          reappearedUpdates.push({
+            rowId: row.id,
+            rowNumber: row.rowNumber,
+            exNum: cellVal(row, OUT.exNum),
+            ir, inspector: cellVal(row, OUT.inspector), date,
+            addedOn: cellVal(row, OUT.addedOn),
+            newNote
+          });
+        }
+        return;
+      }
+
       if (endsWithVanishedNote(existingNotes)) return;
       const newNote = (existingNotes.trim() ? existingNotes.trim() + ' ' : '') +
         `⚠️ No longer present in source as of ${formatMDY(todayISO())} — may have been removed by inspector; verify before logging.`;
@@ -849,16 +908,19 @@ async function run() {
       });
     });
 
-    if (vanishedUpdates.length) {
+    const noteUpdates = [...vanishedUpdates, ...reappearedUpdates];
+    if (noteUpdates.length) {
       const res = await fetch(`${PROXY}/sheets/${OUTPUT_SHEET}/rows`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(vanishedUpdates.map(v => ({ id: v.rowId, cells: [{ columnId: OUT.notes, value: v.newNote }] })))
+        body: JSON.stringify(noteUpdates.map(v => ({ id: v.rowId, cells: [{ columnId: OUT.notes, value: v.newNote }] })))
       });
       if (!res.ok) {
         const txt = await res.text().catch(() => '');
         throw new Error(`Update rows failed: ${res.status} ${txt.slice(0, 200)}`);
       }
+    }
+    if (vanishedUpdates.length) {
       vanishedUpdates.forEach(v => {
         log(`VANISHED — Ex#${v.exNum} / IR#${v.ir} / ${v.inspector} (${formatMDY(v.date)}) flagged.`, 'warn');
         vanishedRowsHtml += buildVanishedRow(v);
@@ -866,6 +928,15 @@ async function run() {
       stats.vanished = vanishedUpdates.length;
     } else {
       log('No previously-tracked items vanished from source.', 'info');
+    }
+    if (reappearedUpdates.length) {
+      reappearedUpdates.forEach(v => {
+        log(`REAPPEARED — Ex#${v.exNum} / IR#${v.ir} / ${v.inspector} (${formatMDY(v.date)}) flagged.`, 'success');
+        reappearedRowsHtml += buildReappearedRow(v);
+      });
+      stats.reappeared = reappearedUpdates.length;
+    } else {
+      log('No previously-vanished items reappeared in source.', 'info');
     }
 
     setProgress('Done.', 100);
@@ -877,10 +948,11 @@ async function run() {
     btn.innerHTML = '&#x25B6; Run Check';
     updateRunBtn();
 
-    document.getElementById('statAdded').textContent    = stats.added;
-    document.getElementById('statVanished').textContent = stats.vanished;
-    document.getElementById('statMatched').textContent  = stats.matched;
-    document.getElementById('statErrors').textContent   = stats.errors;
+    document.getElementById('statAdded').textContent      = stats.added;
+    document.getElementById('statVanished').textContent   = stats.vanished;
+    document.getElementById('statReappeared').textContent = stats.reappeared;
+    document.getElementById('statMatched').textContent    = stats.matched;
+    document.getElementById('statErrors').textContent     = stats.errors;
     document.getElementById('summaryBar').classList.add('visible');
     document.getElementById('clearBtn').classList.add('visible');
 
@@ -893,6 +965,11 @@ async function run() {
       document.getElementById('vanishedRecordsTbody').innerHTML = vanishedRowsHtml;
       document.getElementById('vanishedRecordsPanel').classList.add('visible');
       document.getElementById('vanishedRecordsCount').textContent = `${stats.vanished} row(s)`;
+    }
+    if (reappearedRowsHtml) {
+      document.getElementById('reappearedRecordsTbody').innerHTML = reappearedRowsHtml;
+      document.getElementById('reappearedRecordsPanel').classList.add('visible');
+      document.getElementById('reappearedRecordsCount').textContent = `${stats.reappeared} row(s)`;
     }
 
     document.getElementById('diagPanel').classList.add('visible');
@@ -913,7 +990,7 @@ async function run() {
     const cappedCount = countBasedRows.filter(r => r.verdict === 'capped').length;
     if (cappedCount) log(`${cappedCount} residual row(s) capped out by quota — potential ghosts, see Diagnostics tab.`, 'warn');
 
-    log(`Run complete — ${stats.added} added, ${stats.vanished} vanished-flagged, ${stats.matched} exact-matched, ${stats.errors} error(s).`, stats.errors ? 'warn' : 'success');
+    log(`Run complete — ${stats.added} added, ${stats.vanished} vanished-flagged, ${stats.reappeared} reappeared-flagged, ${stats.matched} exact-matched, ${stats.errors} error(s).`, stats.errors ? 'warn' : 'success');
   }
 }
 </script>
