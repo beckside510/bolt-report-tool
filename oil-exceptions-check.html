@@ -57,6 +57,7 @@ body {
   transition: border-color 0.15s;
 }
 .token-input:focus { border-color: var(--accent); }
+#cutoffInput { color-scheme: dark; max-width: 200px; flex: 0 0 auto; }
 .token-status { font-family: var(--mono); font-size: 12px; padding: 4px 10px; border-radius: 4px; white-space: nowrap; }
 .token-status.ok    { color: var(--green); background: rgba(74,232,122,0.1); border: 1px solid rgba(74,232,122,0.2); }
 .token-status.err   { color: var(--red);   background: rgba(232,74,74,0.1);  border: 1px solid rgba(232,74,74,0.2); }
@@ -166,7 +167,7 @@ table.records tr:last-child td { border-bottom: none; }
 </div>
 
 <div class="instructions">
-  <strong>How to use:</strong> Refresh the source <strong>Exceptions</strong> sheet in Smartsheet first, then paste your API token below and click <strong>Run Check</strong>. New missing exceptions are added to the tracking sheet with Status = <strong>HOLD</strong> — start your 24-hour hold from there. Previously-tracked HOLD rows that disappeared from the source get a note appended, never deleted. Run once per business day.
+  <strong>How to use:</strong> Refresh the source <strong>Exceptions</strong> sheet in Smartsheet first, then paste your API token below, confirm the <strong>Source Start Date</strong> matches the earliest date you paste in, and click <strong>Run Check</strong>. New missing exceptions are added to the tracking sheet with Status = <strong>HOLD</strong> — start your 24-hour hold from there. Previously-tracked HOLD rows that disappeared from the source get a note appended, never deleted. Run once per business day.
 </div>
 
 <!-- Step 1: Token -->
@@ -179,9 +180,18 @@ table.records tr:last-child td { border-bottom: none; }
   <div class="field-hint">Stored locally in your browser. Shared token — get it from Rebecca if you don't have one.</div>
 </div>
 
-<!-- Step 2: Run -->
+<!-- Step 2: Source start date -->
 <div class="panel">
-  <h2>Step 2 &mdash; Run the Check</h2>
+  <h2>Step 2 &mdash; Source Start Date</h2>
+  <div class="token-row">
+    <input type="date" class="token-input" id="cutoffInput">
+  </div>
+  <div class="field-hint">Set this to the earliest date you paste into the source <strong>Exceptions</strong> sheet. Source rows <em>and</em> tracked HOLD rows dated before it are ignored — earlier items are never flagged as vanished. Historical dedup still spans everything, so nothing gets re-added. Saved locally in your browser.</div>
+</div>
+
+<!-- Step 3: Run -->
+<div class="panel">
+  <h2>Step 3 &mdash; Run the Check</h2>
   <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px;">Reads the Exceptions sheet and all 4 destination logs, computes what's missing and what's vanished, and writes the results straight to the tracking sheet.</p>
   <div class="progress-wrap" id="progressWrap">
     <div class="progress-label"><span id="progressLabel">Starting…</span><span id="progressPct">0%</span></div>
@@ -287,6 +297,8 @@ table.records tr:last-child td { border-bottom: none; }
 // ── Config ───────────────────────────────────────────────────────────────
 const PROXY = 'https://smartsheet-proxy.rebecca-91f.workers.dev/2.0';
 const LS_TOKEN_KEY = 'oil_check_sm_token';
+const LS_CUTOFF_KEY = 'oil_check_cutoff_date';
+const DEFAULT_CUTOFF = '2026-06-01';
 
 const SOURCE_SHEET = '2976370849173380';
 const SRC = {
@@ -515,6 +527,13 @@ window.addEventListener('DOMContentLoaded', () => {
     setTokenStatus('busy', 'Verifying…');
     verifyToken(saved);
   }
+  const cutoffEl = document.getElementById('cutoffInput');
+  let savedCutoff = '';
+  try { savedCutoff = localStorage.getItem(LS_CUTOFF_KEY) || ''; } catch (_) {}
+  cutoffEl.value = savedCutoff || DEFAULT_CUTOFF;
+  cutoffEl.addEventListener('change', () => {
+    try { localStorage.setItem(LS_CUTOFF_KEY, cutoffEl.value); } catch (_) {}
+  });
 });
 
 // ── Smartsheet fetch helper ─────────────────────────────────────────────────
@@ -644,8 +663,9 @@ async function run() {
   updateRunBtn();
   resetUI();
 
-  const token = document.getElementById('tokenInput').value.trim();
-  const btn   = document.getElementById('runBtn');
+  const token  = document.getElementById('tokenInput').value.trim();
+  const cutoff = (document.getElementById('cutoffInput').value || DEFAULT_CUTOFF).trim();
+  const btn    = document.getElementById('runBtn');
   btn.innerHTML = '<span class="spinner"></span> Running…';
 
   const stats = { added: 0, vanished: 0, reappeared: 0, matched: 0, errors: 0 };
@@ -657,6 +677,7 @@ async function run() {
     log('Loading source Exceptions sheet…', 'info');
     const srcData = await fetchSheet(token, SOURCE_SHEET);
     log(`Loaded ${srcData.rows.length} source row(s).`, 'success');
+    log(`Source start date: ${formatMDY(cutoff)} — source rows and tracked HOLD rows dated earlier are ignored.`, 'info');
 
     setProgress('Loading 4 destination OIL/BMR logs…', 20);
     log('Loading destination OIL/BMR logs (4 sheets)…', 'info');
@@ -693,12 +714,14 @@ async function run() {
 
     setProgress('Applying exclusion filter…', 55);
     const filteredSource = [];
-    let excludedCount = 0, skippedIncomplete = 0;
+    let excludedCount = 0, skippedIncomplete = 0, skippedPreCutoff = 0;
     srcData.rows.forEach(row => {
       const ir = String(cellVal(row, SRC.ir) || '').trim();
       const inspector = String(cellVal(row, SRC.inspector) || '').trim();
       const dateRaw = cellVal(row, SRC.date);
       const desc = String(cellVal(row, SRC.desc) || '');
+      const dateISO = normISODate(dateRaw);
+      if (dateISO && dateISO < cutoff) { skippedPreCutoff++; return; }
       if (!ir || !inspector || !dateRaw) {
         skippedIncomplete++;
         const missing = [];
@@ -726,7 +749,7 @@ async function run() {
         resNotes: cellVal(row, SRC.resNotes)
       });
     });
-    log(`${filteredSource.length} eligible source row(s) after exclusion filter (excluded ${excludedCount}, skipped ${skippedIncomplete} incomplete).`, 'info');
+    log(`${filteredSource.length} eligible source row(s) after exclusion filter (excluded ${excludedCount}, skipped ${skippedIncomplete} incomplete, ${skippedPreCutoff} before ${formatMDY(cutoff)}).`, 'info');
 
     setProgress('Exact-matching against destination logs…', 65);
     const residualPool = {};
@@ -824,6 +847,7 @@ async function run() {
       setProgress('Writing new rows to tracking sheet…', 90);
       const rowDefs = finalNew.map(c => {
         const cells = [
+          { columnId: OUT.exNum, value: c.exNum || '' },
           { columnId: OUT.seqNum, value: c.seqNum || '' },
           { columnId: OUT.inspRpt, value: c.inspRpt || '' },
           { columnId: OUT.ir, value: c.ir },
@@ -871,6 +895,7 @@ async function run() {
       const inspectorNorm = normInspector(cellVal(row, OUT.inspector));
       const date = normISODate(cellVal(row, OUT.date));
       if (!ir || !inspectorNorm || !date) return;
+      if (date < cutoff) return;  // outside the maintained source window — don't flag vanished/reappeared
       if (cellVal(row, OUT.status) !== 'HOLD') return;
       const key = `${ir}|${inspectorNorm}|${date}`;
       const existingNotes = String(cellVal(row, OUT.notes) || '');
