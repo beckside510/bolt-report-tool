@@ -267,34 +267,82 @@ async function handleFile(file) {
   setTimeout(() => { setProgress(false); showResults(); }, 400);
 }
 
-// ---- Extract cuts ----
-function extractCuts(rawText) {
+// ---- Boilerplate (repeating page header / footer) line patterns ----
+// Applied line-by-line so the cut blocks merge cleanly across page breaks
+// regardless of how the header is laid out (single column vs. two-column merged).
+const BOILERPLATE_LINE = [
+  /^\s*•?\s*(?:Phone|Fax|Tel)\.?\s*[:(]?\s*\(?\d{3}\)?[\s.-]?\d{3}/i,
+  /^\s*\d{2,4}\s+\S.*\b(?:Drive|Rd\.?|Road|St\.?|Street|Ave\.?|Avenue|Suite|Ste\.?|Blvd\.?|Way|Hwy|Highway)\b.*\b[A-Z]{2}\b/i,
+  /^\s*(?:TESTING|INSPECTION|ENGINEERING)\s*$/i,
+  /^\s*Project\s*(?:No|Name|Location)\s*[:.]/i,
+  /^\s*CTS\s*Representative\s*[:.]/i,
+  /^\s*Inspection\s*(?:Type|Location)\.?\s*[:.]/i,
+  /^\s*TIO\s*Index\s*no\.?\s*[:.]/i,
+  /^\s*Pg\.?\s*\d+\s*of\s*\d+/i,
+  /^\s*(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}\s*$/i,
+  /^\s*Time\s*In\s*[:.]/i,
+  /^\s*DFR\s*ID\s*[:.]/i,
+  /^\s*Weather\s*[:.]/i,
+  /^\s*Temperature\s*[:.]/i,
+  /^\s*Wind\s*Speed\s*[:.]/i,
+  /^\s*HCAI#?\s*[:.]/i,
+  /^\s*Inspection\s*Request\s*no\.?\s*[:.]/i,
+];
+
+// Labels of adjacent header fields that can bleed into a captured value when a
+// two-column header row is flattened into one line.
+const BLEED_TRIM = /\s{2,}.*$|\s+(?:Time\s*In|Pg\.?\s*\d|DFR\s*ID|Weather|Temperature|Wind\s*Speed|HCAI#?|Inspection\s*(?:Request|Type|Location)|CTS\s*Representative|TIO\s*Index|Break|Time\s*Out|Project\s*(?:No|Location))\b.*$|\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}.*$/i;
+
+// ---- Extract report-level metadata (run on the raw text, before stripping) ----
+function extractMeta(rawText) {
   const meta = {};
 
-  const irMatch = rawText.match(/Inspection Request\s*no\.?\s*[:\.]?\s*(\d+)/i);
+  const irMatch = rawText.match(/Inspection Request\s*no\.?\s*[:.]?\s*(\d{2,6})/i)
+    || rawText.match(/\bIR\s*[#:]?\s*(\d{3,6})\b/i);
   if (irMatch) meta.ir = irMatch[1];
-  const dfrMatch = rawText.match(/DFR\s*ID\s*[:\.]?\s*(\d+)/i);
+
+  const dfrMatch = rawText.match(/DFR\s*ID\s*[:.]?\s*(\d+)/i);
   if (dfrMatch) meta.dfr = dfrMatch[1];
-  const dateMatch = rawText.match(/(?:February|January|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}/);
+
+  const dateMatch = rawText.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}/)
+    || rawText.match(/\b\d{4}-\d{2}-\d{2}\b/)
+    || rawText.match(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/);
   if (dateMatch) meta.date = dateMatch[0];
-  const projMatch = rawText.match(/Project Name\s*[:\.]?\s*([^\n]{10,80})/i);
-  if (projMatch) meta.project = projMatch[1].trim().substring(0, 60);
 
-  // Strip repeating page headers and footers so cross-page cuts merge cleanly
-  // Strategy: strip the TESTING/INSPECTION/ENGINEERING block up through the last known
-  // header line (Inspection Request no., TIO Index, HCAI#, or Wind Speed) — all of
-  // which appear in both single-column and two-column merged header formats.
-  // We do NOT use a field-label lookahead because that can consume cut data on the next page.
-  let text = rawText.replace(
-    /TESTING\s*\nINSPECTION\s*\nENGINEERING\s*\n[\s\S]*?(?:Inspection Request\s*no\.?\s*[:\.]?\s*\d+|Wind Speed\s*[:\.]?[^\n]*)\s*\n/gi,
-    '\n'
+  // Project Name can appear many times (once per page). Take the cleanest, longest
+  // candidate after trimming any bled-in adjacent header text.
+  let best = '';
+  const projRe = /Project\s*Name\s*[:.]?\s*(.+)/gi;
+  let pm;
+  while ((pm = projRe.exec(rawText)) !== null) {
+    const cand = pm[1].replace(BLEED_TRIM, '').trim();
+    if (cand.length > best.length) best = cand;
+  }
+  if (best) meta.project = best.substring(0, 100);
+
+  return meta;
+}
+
+// ---- Extract cuts ----
+function extractCuts(rawText) {
+  const meta = extractMeta(rawText);
+
+  // Drop repeating header/footer lines so a cut split across a page break rejoins.
+  const text = rawText
+    .split('\n')
+    .filter(line => !BOILERPLATE_LINE.some(re => re.test(line)))
+    .join('\n');
+
+  // Cut header: "Cut 1", "Cut 1:", "Cut #1", "Cut No. 1", with optional trailing
+  // prose on the same line (e.g. "Cut 17: RECAL reprocessed this piece...").
+  const CUT_HEAD = String.raw`\bCut\s*#?\s*(?:No\.?\s*)?(\d+)\b\s*[:.\-]?[ \t]*`;
+  const CUT_HEAD_LA = String.raw`\bCut\s*#?\s*(?:No\.?\s*)?\d+\b\s*[:.\-]?`;
+  // Terminate a block at the next cut, a numbered narrative section ("5. ..."), or EOF.
+  const cutRegex = new RegExp(
+    CUT_HEAD + String.raw`([\s\S]*?)(?=` + CUT_HEAD_LA + String.raw`|\n\s*\d{1,2}\.\s|$)`,
+    'gi'
   );
-  text = text.replace(/2118 Rheem Drive[\s\S]*?Fax \(510\) 835-1825\s*\n/g, '\n');
-  // Also strip partial header remnants (HCAI# and Inspection Request no.) that trail
-  // after the footer on pages where a cut splits across a page break
-  text = text.replace(/HCAI#[^\n]*\nInspection Request\s*no\.?[^\n]*\n/g, '\n');
 
-  const cutRegex = /\bCut\s+(\d+)\s*\n([\s\S]*?)(?=\bCut\s+\d+\s*\n|\n6\.\s|$)/g;
   const cuts = [];
   let match;
 
@@ -305,19 +353,22 @@ function extractCuts(rawText) {
     const field = (regex) => {
       const m = block.match(regex);
       if (!m) return null;
-      return m[1].replace(/^[•\s\-–]+/, '').trim().split('\n')[0].trim();
+      return m[1]
+        .replace(/^[•·○▪‣*\s\-–—]+/, '')   // leading bullet / dash characters
+        .replace(BLEED_TRIM, '')            // trailing bled-in header text
+        .trim().split('\n')[0].trim();
     };
 
     const cut = {
       cutNum,
-      identificationCode:    field(/Identification\s*Code\s*:\s*([^\n]+)/i),
-      heatNumber:            field(/Heat\s*Number\s*:\s*([^\n]+)/i),
-      plateNumber:           field(/Plate\s*Number\s*:\s*([^\n]+)/i),
-      dimensions:            field(/Dimensions\s*:\s*([^\n]+)/i),
-      astmMaterial:          field(/ASTM\s*Material\s*:\s*([^\n]+)/i),
-      quantity:              field(/Quantity\s*:\s*([^\n]+)/i),
-      finalAssemblyLocation: field(/Final\s*Assembly\s*Location\s*:\s*([^\n]+)/i),
-      specialTesting:        field(/Special\s*Testing\s*:\s*([^\n]+)/i),
+      identificationCode:    field(/Identification\s*Code\s*[:.\-]?\s*([^\n]+)/i),
+      heatNumber:            field(/Heat\s*Number\s*[:.\-]?\s*([^\n]+)/i),
+      plateNumber:           field(/Plate\s*Number\s*[:.\-]?\s*([^\n]+)/i),
+      dimensions:            field(/Dimensions?\s*[:.\-]?\s*([^\n]+)/i),
+      astmMaterial:          field(/ASTM\s*Material\s*[:.\-]?\s*([^\n]+)/i),
+      quantity:              field(/Quantity\s*[:.\-]?\s*([^\n]+)/i),
+      finalAssemblyLocation: field(/Final\s*Assembly\s*Location\s*[:.\-]?\s*([^\n]+)/i),
+      specialTesting:        field(/Special\s*Testing\s*[:.\-]?\s*([^\n]+)/i),
     };
 
     if (cut.identificationCode || cut.heatNumber) {
